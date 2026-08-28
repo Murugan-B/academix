@@ -1,0 +1,35 @@
+import { Routes, Route, Navigate } from 'react-router-dom';
+import Login from './pages/Login';
+import UsersAndRoles from './pages/UsersAndRoles';
+import Settings from './pages/Settings';
+import Subjects from './pages/Subjects';
+import SuperAdminDashboard from './pages/SuperAdminDashboard';
+import InstituteAdminDashboard from './pages/InstituteAdminDashboard';
+import HodDashboard from './pages/HodDashboard';
+import FacultyDashboard from './pages/FacultyDashboard';
+import StudentDashboard from './pages/StudentDashboard';
+import Layout from './components/layout/Layout';
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/login" element={<Login />} />
+      
+      <Route path="/" element={<Layout />}>
+        <Route path="super-admin" element={<SuperAdminDashboard />} />
+        <Route path="institute-admin" element={<InstituteAdminDashboard />} />
+        <Route path="hod" element={<HodDashboard />} />
+        <Route path="faculty" element={<FacultyDashboard />} />
+        <Route path="student" element={<StudentDashboard />} />
+        <Route path="users" element={<UsersAndRoles />} />
+        <Route path="settings" element={<Settings />} />
+        <Route path="subjects" element={<Subjects />} />
+        <Route index element={<Navigate to="/login" replace />} />
+      </Route>
+      
+      <Route path="*" element={<Navigate to="/login" replace />} />
+    </Routes>
+  );
+}
+
+export default App;
