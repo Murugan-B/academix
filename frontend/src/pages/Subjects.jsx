@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { BookText, Plus, Trash2, X } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import api from '../api/axios';
 
 export default function Subjects() {
@@ -7,6 +8,7 @@ export default function Subjects() {
   const [activeSemester, setActiveSemester] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const navigate = useNavigate();
 
   // Role detection
   const userStr = localStorage.getItem('user');
@@ -118,14 +120,21 @@ export default function Subjects() {
         ) : (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
             {subjects.map(subject => (
-              <div key={subject.id} className="p-5 rounded-2xl border border-slate-100 bg-slate-50 flex justify-between items-start hover:shadow-md transition-all group">
+              <div 
+                key={subject.id} 
+                onClick={() => navigate(`/subjects/${subject.id}`)}
+                className="p-5 rounded-2xl border border-slate-100 bg-slate-50 flex justify-between items-start hover:shadow-md transition-all group cursor-pointer"
+              >
                 <div>
                   <h3 className="font-bold text-slate-800 text-lg leading-tight mb-1">{subject.name}</h3>
                   <p className="text-sm font-semibold text-indigo-600 uppercase tracking-wider">{subject.code}</p>
                 </div>
                 {isHod && (
                   <button 
-                    onClick={() => handleDelete(subject.id)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(subject.id);
+                    }}
                     className="p-2 text-slate-300 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors opacity-0 group-hover:opacity-100"
                   >
                     <Trash2 className="w-4 h-4" />

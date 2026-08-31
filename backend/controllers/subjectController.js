@@ -37,6 +37,19 @@ exports.getSubjects = async (req, res) => {
   }
 };
 
+exports.getSubjectById = async (req, res) => {
+  const { id } = req.params;
+  const { department_id } = req.user;
+
+  try {
+    const result = await db.query('SELECT * FROM subjects WHERE id = $1 AND department_id = $2', [id, department_id]);
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Subject not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
 exports.deleteSubject = async (req, res) => {
   const { id } = req.params;
   const { department_id } = req.user;

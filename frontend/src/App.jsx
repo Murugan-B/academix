@@ -3,6 +3,7 @@ import Login from './pages/Login';
 import UsersAndRoles from './pages/UsersAndRoles';
 import Settings from './pages/Settings';
 import Subjects from './pages/Subjects';
+import SubjectDetails from './pages/SubjectDetails';
 import SuperAdminDashboard from './pages/SuperAdminDashboard';
 import InstituteAdminDashboard from './pages/InstituteAdminDashboard';
 import HodDashboard from './pages/HodDashboard';
@@ -24,6 +25,7 @@ function App() {
         <Route path="users" element={<UsersAndRoles />} />
         <Route path="settings" element={<Settings />} />
         <Route path="subjects" element={<Subjects />} />
+        <Route path="subjects/:subjectId" element={<SubjectDetails />} />
         <Route index element={<Navigate to="/login" replace />} />
       </Route>
       
