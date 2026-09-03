@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Users, FileCheck, ArrowUpRight, Activity, X, UserPlus } from 'lucide-react';
 import api from '../api/axios';
+import NotificationPanel from '../components/NotificationPanel';
 
 export default function HodDashboard() {
   const [showModal, setShowModal] = useState(false);
@@ -13,6 +14,13 @@ export default function HodDashboard() {
   const [faculties, setFaculties] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+
+  // Notification state
+  const [showNotifModal, setShowNotifModal] = useState(false);
+  const [notifTitle, setNotifTitle] = useState('');
+  const [notifMessage, setNotifMessage] = useState('');
+  const [notifRecipientType, setNotifRecipientType] = useState('DEPARTMENT');
+  const [notifRecipientId, setNotifRecipientId] = useState('');
 
   useEffect(() => {
     fetchFaculties();
@@ -54,6 +62,30 @@ export default function HodDashboard() {
     }
   };
 
+  const handleCreateNotification = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    setError('');
+    try {
+      await api.post('/notifications', {
+        title: notifTitle,
+        message: notifMessage,
+        recipient_type: notifRecipientType,
+        recipient_id: notifRecipientId || null
+      });
+      setShowNotifModal(false);
+      setNotifTitle('');
+      setNotifMessage('');
+      alert('Notification sent successfully!');
+      // Assuming NotificationPanel handles its own fetch, no need to refresh it here
+      // But we can trigger an event or simply let it be.
+    } catch (err) {
+      setError(err.response?.data?.error || 'Failed to send notification');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <div className="animate-in fade-in slide-in-from-bottom-4 duration-700 ease-out">
       <header className="mb-10 flex flex-col md:flex-row md:items-end justify-between gap-4">
@@ -65,6 +97,12 @@ export default function HodDashboard() {
           </p>
         </div>
         <div className="flex gap-3">
+          <button 
+            onClick={() => setShowNotifModal(true)}
+            className="px-5 py-2.5 bg-white text-indigo-600 rounded-xl font-semibold shadow-sm hover:shadow border border-indigo-100 hover:bg-indigo-50 transition-all flex items-center gap-2"
+          >
+            Create Notification
+          </button>
           <button 
             onClick={() => setShowModal(true)}
             className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-xl font-semibold shadow-md shadow-indigo-200 hover:shadow-lg hover:opacity-90 transition-all flex items-center gap-2"
@@ -83,22 +121,27 @@ export default function HodDashboard() {
         </div>
       </div>
 
-      <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white p-8">
-        <h2 className="text-xl font-bold text-slate-800 mb-6">Department Faculty</h2>
-        {faculties.length === 0 ? (
-          <p className="text-slate-500">No faculty members found. Create one above!</p>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {faculties.map((fac) => (
-              <div key={fac.id} className="py-4 flex justify-between items-center">
-                <div>
-                  <h4 className="font-bold text-slate-800">{fac.name}</h4>
-                  <p className="text-sm text-slate-500">{fac.designation} • {fac.email}</p>
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6 lg:gap-8 mb-8">
+        <div className="md:col-span-2 bg-white/80 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white p-8">
+          <h2 className="text-xl font-bold text-slate-800 mb-6">Department Faculty</h2>
+          {faculties.length === 0 ? (
+            <p className="text-slate-500">No faculty members found. Create one above!</p>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {faculties.map((fac) => (
+                <div key={fac.id} className="py-4 flex justify-between items-center">
+                  <div>
+                    <h4 className="font-bold text-slate-800">{fac.name}</h4>
+                    <p className="text-sm text-slate-500">{fac.designation} • {fac.email}</p>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-        )}
+              ))}
+            </div>
+          )}
+        </div>
+        <div>
+          <NotificationPanel />
+        </div>
       </div>
 
       {/* Add Faculty Modal */}
@@ -156,6 +199,50 @@ export default function HodDashboard() {
               <div className="flex justify-end gap-3 mt-8">
                 <button type="button" onClick={() => setShowModal(false)} className="px-5 py-2.5 text-slate-600 font-semibold hover:bg-slate-100 rounded-xl">Cancel</button>
                 <button type="submit" disabled={loading} className="px-5 py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">{loading ? 'Creating...' : 'Create Faculty'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Create Notification Modal */}
+      {showNotifModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center bg-slate-50/50">
+              <h2 className="text-xl font-bold text-slate-800">Create Notification</h2>
+              <button onClick={() => setShowNotifModal(false)} className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-full">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            
+            <form onSubmit={handleCreateNotification} className="p-6">
+              {error && <div className="mb-4 p-3 bg-rose-50 text-rose-600 text-sm font-medium rounded-lg border border-rose-100">{error}</div>}
+              
+              <div className="space-y-4 mb-6">
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-1">Title</label>
+                  <input type="text" required value={notifTitle} onChange={(e) => setNotifTitle(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Notification Title" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-1">Message</label>
+                  <textarea required value={notifMessage} onChange={(e) => setNotifMessage(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" rows="3" placeholder="Enter message..."></textarea>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-1">Send To</label>
+                  <select 
+                    value={notifRecipientType} 
+                    onChange={(e) => setNotifRecipientType(e.target.value)} 
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
+                  >
+                    <option value="DEPARTMENT">Department (All)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 mt-8">
+                <button type="button" onClick={() => setShowNotifModal(false)} className="px-5 py-2.5 text-slate-600 font-semibold hover:bg-slate-100 rounded-xl">Cancel</button>
+                <button type="submit" disabled={loading} className="px-5 py-2.5 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50">{loading ? 'Sending...' : 'Send Notification'}</button>
               </div>
             </form>
           </div>

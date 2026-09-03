@@ -50,13 +50,15 @@ export default function Layout() {
             Dashboard
           </Link>
           
-          <Link 
-            to="/users" 
-            className={`flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all group border ${currentPath === '/users' ? 'text-indigo-700 bg-indigo-50/80 font-semibold shadow-sm border-indigo-100/50 hover:shadow-md hover:bg-indigo-50' : 'text-slate-600 hover:text-indigo-700 hover:bg-white/80 font-medium hover:shadow-sm border-transparent hover:border-slate-100'}`}
-          >
-            <Users className={`w-5 h-5 transition-transform duration-300 ${currentPath === '/users' ? 'text-indigo-600 scale-110' : 'text-slate-400 group-hover:text-indigo-500 group-hover:scale-110'}`} />
-            Users & Roles
-          </Link>
+          {role !== 'STUDENT' && (
+            <Link 
+              to="/users" 
+              className={`flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all group border ${currentPath === '/users' ? 'text-indigo-700 bg-indigo-50/80 font-semibold shadow-sm border-indigo-100/50 hover:shadow-md hover:bg-indigo-50' : 'text-slate-600 hover:text-indigo-700 hover:bg-white/80 font-medium hover:shadow-sm border-transparent hover:border-slate-100'}`}
+            >
+              <Users className={`w-5 h-5 transition-transform duration-300 ${currentPath === '/users' ? 'text-indigo-600 scale-110' : 'text-slate-400 group-hover:text-indigo-500 group-hover:scale-110'}`} />
+              Users & Roles
+            </Link>
+          )}
 
           {['HOD', 'FACULTY', 'STUDENT'].includes(role) && (
             <Link 

@@ -1,7 +1,9 @@
 const db = require('../db');
 const cloudinary = require('../utils/cloudinary');
+const axios = require('axios');
 const https = require('https');
 const http = require('http');
+const { getCloudinaryType } = require('../utils/textExtractor');
 
 // --- HIERARCHY VALIDATION MIDDLEWARE ---
 exports.validateHierarchy = async (req, res, next) => {
@@ -267,76 +269,140 @@ exports.uploadMaterial = async (req, res) => {
 };
 
 exports.deleteMaterial = async (req, res) => {
+  const { materialId } = req.params;
+  const userId = req.user.id;
+  const userRole = req.user.role;
+
   try {
-    // Delete from cloudinary
-    const matRes = await db.query('SELECT cloudinary_public_id FROM materials WHERE id = $1', [req.params.materialId]);
-    if (matRes.rowCount > 0 && matRes.rows[0].cloudinary_public_id) {
-       await cloudinary.uploader.destroy(matRes.rows[0].cloudinary_public_id);
+    // Fetch the full material record
+    const matRes = await db.query(
+      `SELECT m.*, s.department_id
+       FROM materials m
+       JOIN topics t ON m.topic_id = t.id
+       JOIN lessons l ON t.lesson_id = l.id
+       JOIN units u ON l.unit_id = u.id
+       JOIN subjects s ON u.subject_id = s.id
+       WHERE m.id = $1`,
+      [materialId]
+    );
+
+    if (matRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Material not found.' });
     }
-    
-    await db.query('DELETE FROM materials WHERE id = $1', [req.params.materialId]);
-    res.json({ message: 'Material deleted' });
+
+    const material = matRes.rows[0];
+
+    // Role-based authorization
+    if (userRole === 'FACULTY') {
+      // Faculty can only delete materials they uploaded
+      if (material.uploaded_by !== userId) {
+        return res.status(403).json({ error: 'You are not authorized to delete this material. Only the uploader or a HOD can delete it.' });
+      }
+    } else if (userRole === 'HOD') {
+      // HOD can delete any material in their department
+      if (material.department_id !== req.user.department_id) {
+        return res.status(403).json({ error: 'You can only delete materials within your department.' });
+      }
+    } else {
+      // Should be caught by roleMiddleware but defence-in-depth
+      return res.status(403).json({ error: 'Insufficient permissions to delete materials.' });
+    }
+
+    // Delete from Cloudinary if a public_id is stored
+    if (material.cloudinary_public_id) {
+      try {
+        const { getCloudinaryType } = require('../utils/textExtractor');
+        const resourceType = 'raw'; // all academic materials are raw
+        const cloudinaryType = getCloudinaryType(material.file_url);
+        await cloudinary.uploader.destroy(material.cloudinary_public_id, {
+          resource_type: resourceType,
+          type: cloudinaryType, // 'upload' or 'authenticated'
+        });
+        console.log(`[DELETE] Cloudinary asset removed: ${material.cloudinary_public_id}`);
+      } catch (cloudErr) {
+        // Log but do not block DB deletion if Cloudinary cleanup fails
+        console.error(`[DELETE] Cloudinary deletion failed for ${material.cloudinary_public_id}:`, cloudErr.message);
+      }
+    }
+
+    // Delete the database record
+    await db.query('DELETE FROM materials WHERE id = $1', [materialId]);
+    console.log(`[DELETE] Material ${materialId} deleted by user ${userId} (${userRole})`);
+
+    res.json({ message: 'Material deleted successfully.' });
   } catch (err) {
+    console.error('[DELETE] Error:', err.message, err.stack);
     res.status(500).json({ error: err.message });
   }
 };
 
-async function streamDirectURL(url, res, material, disposition) {
-  const client = url.startsWith('https') ? https : http;
-  
-  return new Promise((resolve) => {
-    client.get(url, (streamRes) => {
-      if (streamRes.statusCode >= 400) {
-        resolve({ success: false, statusCode: streamRes.statusCode });
-        return;
-      }
-
-      res.setHeader('Content-Type', material.file_type || 'application/octet-stream');
-      const filename = encodeURIComponent(material.file_name);
-      res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
-      
-      streamRes.pipe(res);
-      streamRes.on('end', () => resolve({ success: true }));
-    }).on('error', (err) => resolve({ success: false, error: err }));
-  });
-}
-
 async function handleMaterialStream(req, res, disposition) {
+  const materialId = req.params.materialId;
+  console.log(`[MATERIAL] ${disposition.toUpperCase()} request. ID: ${materialId}`);
+
   try {
-    const matRes = await db.query('SELECT * FROM materials WHERE id = $1', [req.params.materialId]);
+    const matRes = await db.query('SELECT * FROM materials WHERE id = $1', [materialId]);
     if (matRes.rowCount === 0) return res.status(404).json({ error: 'Material not found' });
     const material = matRes.rows[0];
 
-    let fetchUrl = material.file_url;
-    
-    // Authenticated files must be fetched via signed private download URL
-    if (fetchUrl.includes('/authenticated/')) {
-        fetchUrl = cloudinary.utils.private_download_url(material.cloudinary_public_id, '', { resource_type: 'raw', type: 'authenticated' });
+    console.log(`[MATERIAL] Filename     : ${material.file_name}`);
+    console.log(`[MATERIAL] MIME type    : ${material.file_type}`);
+    console.log(`[MATERIAL] Public ID    : ${material.cloudinary_public_id}`);
+    console.log(`[MATERIAL] Stored URL   : ${material.file_url?.substring(0, 80)}`);
+
+    // Determine the Cloudinary delivery type from the stored URL
+    const cloudinaryType = getCloudinaryType(material.file_url);
+    console.log(`[MATERIAL] Cloudinary type: ${cloudinaryType}`);
+
+    let fetchUrl;
+    if (cloudinaryType === 'authenticated') {
+      if (!material.cloudinary_public_id) {
+        return res.status(502).json({ error: 'Material has no stored Cloudinary reference.' });
+      }
+      fetchUrl = cloudinary.utils.private_download_url(material.cloudinary_public_id, '', {
+        resource_type: 'raw',
+        type: 'authenticated',
+      });
+      console.log(`[MATERIAL] Signed URL   : ${fetchUrl.substring(0, 80)}...`);
+    } else {
+      // Public upload type — use the stored URL directly
+      fetchUrl = material.file_url;
+      console.log(`[MATERIAL] Public URL   : ${fetchUrl.substring(0, 80)}...`);
     }
 
-    let result = await streamDirectURL(fetchUrl, res, material, disposition);
-    
-    // If it's an old public upload file that Cloudinary blocked (e.g. PDF), rename it to authenticated and retry
-    if (!result.success && fetchUrl.includes('/upload/') && result.statusCode === 401) {
-       try {
-         const renameRes = await cloudinary.uploader.rename(material.cloudinary_public_id, material.cloudinary_public_id, { to_type: 'authenticated', resource_type: 'raw' });
-         await db.query('UPDATE materials SET file_url = $1 WHERE id = $2', [renameRes.secure_url, material.id]);
-         material.file_url = renameRes.secure_url;
-         
-         fetchUrl = cloudinary.utils.private_download_url(material.cloudinary_public_id, '', { resource_type: 'raw', type: 'authenticated' });
-         result = await streamDirectURL(fetchUrl, res, material, disposition);
-       } catch (e) {
-         // If rename failed because it was already renamed, try with authenticated anyway
-         fetchUrl = cloudinary.utils.private_download_url(material.cloudinary_public_id, '', { resource_type: 'raw', type: 'authenticated' });
-         result = await streamDirectURL(fetchUrl, res, material, disposition);
-       }
+    // Use axios to download (handles redirects correctly)
+    let axiosRes;
+    try {
+      axiosRes = await axios.get(fetchUrl, {
+        responseType: 'stream',
+        maxRedirects: 5,
+        timeout: 30000,
+      });
+    } catch (err) {
+      console.error(`[MATERIAL] Download failed. Status: ${err.response?.status}`, err.message);
+      if (!res.headersSent) {
+        return res.status(502).json({ error: 'Failed to fetch material from Cloudinary.' });
+      }
+      return;
     }
 
-    if (!result.success && !res.headersSent) {
-       res.status(502).json({ error: 'Unable to retrieve material from storage provider' });
+    console.log(`[MATERIAL] Cloudinary HTTP ${axiosRes.status}. Streaming to client...`);
+
+    res.setHeader('Content-Type', material.file_type || 'application/octet-stream');
+    const filename = encodeURIComponent(material.file_name);
+    res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
+    if (axiosRes.headers['content-length']) {
+      res.setHeader('Content-Length', axiosRes.headers['content-length']);
     }
+
+    axiosRes.data.pipe(res);
+    axiosRes.data.on('error', (err) => {
+      console.error(`[MATERIAL] Stream error:`, err.message);
+      if (!res.headersSent) res.status(500).json({ error: 'Stream error' });
+    });
 
   } catch (err) {
+    console.error(`[MATERIAL] Unexpected error:`, err.message, err.stack);
     if (!res.headersSent) {
       res.status(500).json({ error: err.message });
     }
@@ -345,3 +411,33 @@ async function handleMaterialStream(req, res, disposition) {
 
 exports.viewMaterial = (req, res) => handleMaterialStream(req, res, 'inline');
 exports.downloadMaterial = (req, res) => handleMaterialStream(req, res, 'attachment');
+
+exports.getSignedUrl = async (req, res) => {
+  try {
+    const matRes = await db.query('SELECT * FROM materials WHERE id = $1', [req.params.materialId]);
+    if (matRes.rowCount === 0) return res.status(404).json({ error: 'Material not found' });
+    const material = matRes.rows[0];
+
+    let url = material.file_url;
+    if (url.includes('/authenticated/')) {
+       const options = { 
+         resource_type: 'raw', 
+         type: 'authenticated',
+         expires_at: Math.floor(Date.now() / 1000) + 3600 // 1 hour expiry
+       };
+       if (req.query.download === 'true') {
+         options.attachment = true;
+       }
+       url = cloudinary.utils.private_download_url(material.cloudinary_public_id, '', options);
+    } else {
+       if (req.query.download === 'true') {
+         const filename = encodeURIComponent(material.file_name);
+         url = url.replace('/upload/', `/upload/fl_attachment:${filename}/`);
+       }
+    }
+
+    res.json({ url });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};

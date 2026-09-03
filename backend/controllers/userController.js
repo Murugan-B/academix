@@ -46,27 +46,38 @@ exports.assignMentor = async (req, res) => {
   }
 };
 
-// Faculty creates student and adds to mentees
+// HOD or Faculty creates student and adds to mentees
 exports.addStudent = async (req, res) => {
-  const { name, email, password } = req.body;
-  const mentor_id = req.user.id;
-  const { department_id, institute_id } = req.user;
+  const { name, email, password, department_id, batch_start_year, batch_end_year, roll_number, mentor_id } = req.body;
   
+  // Validate department scope
+  const assignDeptId = department_id || req.user.department_id;
+  if (req.user.role !== 'SUPER_ADMIN' && req.user.role !== 'INSTITUTE_ADMIN') {
+    if (assignDeptId !== req.user.department_id) {
+      return res.status(403).json({ error: 'Cannot assign student to another department' });
+    }
+  }
+
+  // Determine mentor
+  const finalMentorId = mentor_id || req.user.id;
+
   try {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
     // 1. Create Student
     const userResult = await db.query(
-      `INSERT INTO users (name, email, password, role, department_id, institute_id)
-       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id, name, email, role`,
-      [name, email, hashedPassword, 'STUDENT', department_id, institute_id]
+      `INSERT INTO users (name, email, password, role, department_id, institute_id, batch_start_year, batch_end_year, roll_number)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, name, email, role, batch_start_year, batch_end_year, roll_number`,
+      [name, email, hashedPassword, 'STUDENT', assignDeptId, req.user.institute_id, batch_start_year, batch_end_year, roll_number]
     );
     
     const student_id = userResult.rows[0].id;
 
     // 2. Map to Mentor
-    await db.query('INSERT INTO mentor_students (mentor_id, student_id) VALUES ($1, $2)', [mentor_id, student_id]);
+    if (finalMentorId) {
+      await db.query('INSERT INTO mentor_students (mentor_id, student_id) VALUES ($1, $2)', [finalMentorId, student_id]);
+    }
     
     res.status(201).json(userResult.rows[0]);
   } catch (err) {
@@ -79,9 +90,45 @@ exports.getMentees = async (req, res) => {
   const mentor_id = req.user.id;
   try {
     const result = await db.query(
-      `SELECT u.id, u.name, u.email FROM users u 
+      `SELECT u.id, u.name, u.email, u.roll_number, u.batch_start_year, u.batch_end_year 
+       FROM users u 
        JOIN mentor_students ms ON u.id = ms.student_id 
        WHERE ms.mentor_id = $1`, [mentor_id]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Get single student profile
+exports.getStudent = async (req, res) => {
+  const student_id = req.params.id;
+  try {
+    const result = await db.query(
+      `SELECT u.id, u.name, u.email, u.roll_number, u.batch_start_year, u.batch_end_year, 
+              d.name as department_name, m.name as mentor_name
+       FROM users u
+       LEFT JOIN departments d ON u.department_id = d.id
+       LEFT JOIN mentor_students ms ON u.id = ms.student_id
+       LEFT JOIN users m ON ms.mentor_id = m.id
+       WHERE u.id = $1 AND u.role = 'STUDENT'`, 
+       [student_id]
+    );
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Student not found' });
+    res.json(result.rows[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+// Get mentors for a department
+exports.getMentors = async (req, res) => {
+  const department_id = req.query.department_id || req.user.department_id;
+  try {
+    const result = await db.query(
+      `SELECT id, name, email FROM users WHERE department_id = $1 AND is_mentor = TRUE`,
+      [department_id]
     );
     res.json(result.rows);
   } catch (err) {

@@ -9,6 +9,7 @@ import InstituteAdminDashboard from './pages/InstituteAdminDashboard';
 import HodDashboard from './pages/HodDashboard';
 import FacultyDashboard from './pages/FacultyDashboard';
 import StudentDashboard from './pages/StudentDashboard';
+import StudentDetails from './pages/StudentDetails';
 import Layout from './components/layout/Layout';
 
 function App() {
@@ -22,6 +23,7 @@ function App() {
         <Route path="hod" element={<HodDashboard />} />
         <Route path="faculty" element={<FacultyDashboard />} />
         <Route path="student" element={<StudentDashboard />} />
+        <Route path="students/:studentId" element={<StudentDetails />} />
         <Route path="users" element={<UsersAndRoles />} />
         <Route path="settings" element={<Settings />} />
         <Route path="subjects" element={<Subjects />} />

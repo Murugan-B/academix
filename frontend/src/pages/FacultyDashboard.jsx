@@ -1,12 +1,19 @@
 import { useState, useEffect } from 'react';
-import { Users, FileUp, Activity, ArrowUpRight, X, UserPlus } from 'lucide-react';
+import { Users, FileUp, Activity, ArrowUpRight, X, UserPlus, Bell } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import api from '../api/axios';
+import NotificationPanel from '../components/NotificationPanel';
 
 export default function FacultyDashboard() {
   const [showModal, setShowModal] = useState(false);
   const [studentName, setStudentName] = useState('');
   const [studentEmail, setStudentEmail] = useState('');
   const [studentPassword, setStudentPassword] = useState('');
+  const [batchStart, setBatchStart] = useState('');
+  const [batchEnd, setBatchEnd] = useState('');
+  const [rollNumber, setRollNumber] = useState('');
+  const [departmentId, setDepartmentId] = useState('');
+  const [departments, setDepartments] = useState([]);
   
   const [mentees, setMentees] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -19,7 +26,19 @@ export default function FacultyDashboard() {
 
   useEffect(() => {
     fetchMentees();
+    fetchDepartments();
   }, []);
+
+  const fetchDepartments = async () => {
+    try {
+      if (user?.institute_id) {
+        // Since faculty doesn't have an API to fetch all departments globally, 
+        // they can just implicitly use their own department if we don't have the API.
+        // Wait, for faculty, they only add to their department, so let's default to their department ID.
+        setDepartmentId(user.department_id);
+      }
+    } catch (err) {}
+  };
 
   const fetchMentees = async () => {
     try {
@@ -39,11 +58,18 @@ export default function FacultyDashboard() {
         name: studentName,
         email: studentEmail,
         password: studentPassword,
+        batch_start_year: batchStart,
+        batch_end_year: batchEnd,
+        roll_number: rollNumber,
+        department_id: departmentId
       });
       setShowModal(false);
       setStudentName('');
       setStudentEmail('');
       setStudentPassword('');
+      setBatchStart('');
+      setBatchEnd('');
+      setRollNumber('');
       fetchMentees();
       alert('Student created and added to your mentees successfully!');
     } catch (err) {
@@ -84,22 +110,42 @@ export default function FacultyDashboard() {
         </div>
       </div>
 
-      <div className="bg-white/80 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white p-8">
-        <h2 className="text-xl font-bold text-slate-800 mb-6">Your Assigned Mentees</h2>
-        {mentees.length === 0 ? (
-          <p className="text-slate-500">You have no mentees assigned yet.</p>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {mentees.map((mentee) => (
-              <div key={mentee.id} className="py-4 flex justify-between items-center">
-                <div>
-                  <h4 className="font-bold text-slate-800">{mentee.name}</h4>
-                  <p className="text-sm text-slate-500">{mentee.email}</p>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 mb-8">
+        <div className="lg:col-span-2 bg-white/80 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white p-8">
+          <h2 className="text-xl font-bold text-slate-800 mb-6">Your Assigned Mentees</h2>
+          {mentees.length === 0 ? (
+            <p className="text-slate-500">You have no mentees assigned yet.</p>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {mentees.map((mentee) => {
+                const currentYear = new Date().getFullYear();
+                let year = 'N/A';
+                if (mentee.batch_start_year) {
+                  let diff = currentYear - mentee.batch_start_year;
+                  if (new Date().getMonth() >= 7) diff += 1;
+                  year = diff === 1 ? '1st Year' : diff === 2 ? '2nd Year' : diff === 3 ? '3rd Year' : diff >= 4 ? '4th Year' : 'Incoming';
+                }
+
+                return (
+                  <Link 
+                    to={`/students/${mentee.id}`} 
+                    key={mentee.id} 
+                    className="py-4 flex justify-between items-center hover:bg-slate-50 transition-colors -mx-4 px-4 rounded-xl"
+                  >
+                    <div>
+                      <h4 className="font-bold text-indigo-600 hover:text-indigo-800">{mentee.name}</h4>
+                      <p className="text-sm text-slate-500">{mentee.roll_number} • {year}</p>
+                    </div>
+                    <ArrowUpRight className="w-5 h-5 text-slate-400" />
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
+        <div>
+          <NotificationPanel />
+        </div>
       </div>
 
       {/* Add Student Modal */}
@@ -116,7 +162,7 @@ export default function FacultyDashboard() {
             <form onSubmit={handleAddStudent} className="p-6">
               {error && <div className="mb-4 p-3 bg-rose-50 text-rose-600 text-sm font-medium rounded-lg border border-rose-100">{error}</div>}
               
-              <div className="space-y-4 mb-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
                 <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1">Student Name</label>
                   <input type="text" required value={studentName} onChange={(e) => setStudentName(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. Alex" />
@@ -126,8 +172,20 @@ export default function FacultyDashboard() {
                   <input type="email" required value={studentEmail} onChange={(e) => setStudentEmail(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="alex@institute.edu" />
                 </div>
                 <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-1">Roll Number</label>
+                  <input type="text" required value={rollNumber} onChange={(e) => setRollNumber(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. 7376242AD225" />
+                </div>
+                <div>
                   <label className="block text-sm font-bold text-slate-700 mb-1">Temporary Password</label>
                   <input type="password" required value={studentPassword} onChange={(e) => setStudentPassword(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="Enter password" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-1">Batch Start Year</label>
+                  <input type="number" required value={batchStart} onChange={(e) => setBatchStart(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. 2025" />
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-700 mb-1">Batch End Year</label>
+                  <input type="number" required value={batchEnd} onChange={(e) => setBatchEnd(e.target.value)} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 focus:ring-2 focus:ring-indigo-500 outline-none" placeholder="e.g. 2029" />
                 </div>
               </div>
 

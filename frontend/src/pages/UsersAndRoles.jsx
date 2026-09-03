@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Users, Building, GraduationCap, Activity, RefreshCw, X, ChevronRight } from 'lucide-react';
 import api from '../api/axios';
 
 export default function UsersAndRoles() {
+  const navigate = useNavigate();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -19,8 +21,14 @@ export default function UsersAndRoles() {
   const [activeHodTab, setActiveHodTab] = useState('FACULTY'); // FACULTY, STUDENTS
 
   useEffect(() => {
+    const userStr = localStorage.getItem('user');
+    const user = userStr ? JSON.parse(userStr) : null;
+    if (user?.role === 'STUDENT') {
+      navigate('/student', { replace: true });
+      return;
+    }
     fetchHierarchy();
-  }, []);
+  }, [navigate]);
 
   const fetchHierarchy = async () => {
     try {
