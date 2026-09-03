@@ -12,6 +12,7 @@ function MaterialViewer({ material, onDownload, onOpenSummary, onOpenChat }) {
   const [officeUrl, setOfficeUrl] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
 
   useEffect(() => {
     if (!material) return;
@@ -23,6 +24,7 @@ function MaterialViewer({ material, onDownload, onOpenSummary, onOpenChat }) {
     setError(false);
     setBlobUrl(null);
     setOfficeUrl(null);
+    setIframeLoaded(false);
 
     if (['pdf', 'txt', 'ppt', 'pptx', 'doc', 'docx', 'xls', 'xlsx'].includes(ext)) {
       api.get(`/academic/materials/${material.id}/signed-url`)
@@ -70,36 +72,45 @@ function MaterialViewer({ material, onDownload, onOpenSummary, onOpenChat }) {
   const ext = material.file_name.split('.').pop().toLowerCase();
   let previewContent = null;
 
-  if (ext === 'pdf') {
+  if (ext === 'pdf' || ext === 'txt') {
     if (loading) {
       previewContent = (
-        <div className="flex flex-col items-center justify-center h-full text-slate-500">
+        <div className="flex flex-col items-center justify-center h-full text-slate-500 bg-slate-50">
           <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4" />
-          <p>Loading secure PDF preview...</p>
+          <p>Loading material...</p>
         </div>
       );
     } else if (error || !blobUrl) {
       previewContent = (
-        <div className="flex flex-col items-center justify-center h-full text-slate-500">
+        <div className="flex flex-col items-center justify-center h-full text-slate-500 bg-slate-50">
           <AlertCircle className="w-12 h-12 text-rose-400 mb-4" />
-          <p>Unable to retrieve preview. You can download the material instead.</p>
+          <p>Unable to load preview. You can download the material instead.</p>
         </div>
       );
     } else {
       previewContent = (
-        <iframe
-          src={`${blobUrl}#toolbar=0`}
-          className="w-full h-full border-0"
-          title={material.title}
-        />
+        <div className="relative w-full h-full bg-slate-50">
+          {!iframeLoaded && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 z-0 bg-slate-50">
+              <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4" />
+              <p>Loading material...</p>
+            </div>
+          )}
+          <iframe
+            src={ext === 'pdf' ? `${blobUrl}#toolbar=0` : blobUrl}
+            className={`relative w-full h-full border-0 z-10 bg-white transition-opacity duration-300 ${iframeLoaded ? 'opacity-100' : 'opacity-0'}`}
+            title={material.title}
+            onLoad={() => setIframeLoaded(true)}
+          />
+        </div>
       );
     }
   } else if (['ppt', 'pptx', 'doc', 'docx', 'xls', 'xlsx'].includes(ext)) {
     if (loading) {
       previewContent = (
-        <div className="flex flex-col items-center justify-center h-full text-slate-500">
+        <div className="flex flex-col items-center justify-center h-full text-slate-500 bg-slate-50">
           <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4" />
-          <p>Requesting secure Office Viewer access...</p>
+          <p>Loading material...</p>
         </div>
       );
     } else if (error || !officeUrl) {
@@ -107,51 +118,30 @@ function MaterialViewer({ material, onDownload, onOpenSummary, onOpenChat }) {
         <div className="flex flex-col items-center justify-center h-full bg-slate-50 text-slate-600 p-8 text-center">
           <AlertCircle className="w-16 h-16 text-slate-300 mb-5" />
           <h2 className="text-2xl font-bold text-slate-800 mb-2">Preview unavailable</h2>
-          <p className="max-w-md mb-8">This file cannot be previewed in the browser. You can download the file instead.</p>
+          <p className="max-w-md mb-8">Unable to load preview. You can download the material instead.</p>
         </div>
       );
     } else {
       previewContent = (
         <div className="relative w-full h-full bg-slate-50">
-          <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 z-0">
-            <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4" />
-            <p>Loading Office Viewer...</p>
-          </div>
+          {!iframeLoaded && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-500 z-0 bg-slate-50">
+              <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4" />
+              <p>Loading material...</p>
+            </div>
+          )}
           <iframe
             src={officeUrl}
-            className="relative w-full h-full border-0 z-10 bg-white"
+            className={`relative w-full h-full border-0 z-10 bg-white transition-opacity duration-300 ${iframeLoaded ? 'opacity-100' : 'opacity-0'}`}
             title={material.title}
+            onLoad={() => setIframeLoaded(true)}
           />
         </div>
       );
     }
-  } else if (ext === 'txt') {
-    if (loading) {
-      previewContent = (
-        <div className="flex flex-col items-center justify-center h-full text-slate-500">
-          <div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mb-4" />
-          <p>Loading text preview...</p>
-        </div>
-      );
-    } else if (error || !blobUrl) {
-      previewContent = (
-        <div className="flex flex-col items-center justify-center h-full text-slate-500">
-          <AlertCircle className="w-12 h-12 text-rose-400 mb-4" />
-          <p>Unable to preview this material.</p>
-        </div>
-      );
-    } else {
-      previewContent = (
-        <iframe
-          src={blobUrl}
-          className="w-full h-full border-0 bg-white p-4"
-          title={material.title}
-        />
-      );
-    }
   } else {
     previewContent = (
-      <div className="flex flex-col items-center justify-center h-full text-slate-500">
+      <div className="flex flex-col items-center justify-center h-full text-slate-500 bg-slate-50">
         <AlertCircle className="w-12 h-12 text-slate-400 mb-4" />
         <p>Preview is not available for this file type.</p>
       </div>
@@ -722,7 +712,7 @@ export default function SubjectDetails() {
       const a = document.createElement('a');
       a.href = url;
       a.download = mat.file_name;
-      a.target = '_blank';
+      // Do not use target='_blank' to avoid opening new tabs for downloads
       document.body.appendChild(a);
       a.click();
       a.remove();
