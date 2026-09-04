@@ -1,6 +1,6 @@
 const db = require('../db');
 const aiService = require('../services/ai/aiService');
-const { extractTextFromMaterial, EmptyDocumentError, DownloadError, ExtractionError } = require('../utils/textExtractor');
+const { extractTextFromMaterial, EmptyDocumentError, DownloadError, ExtractionError, UnsupportedFormatError } = require('../utils/textExtractor');
 
 // Helper to fetch material and verify access (very basic check)
 // In a real app, you would join on topics -> lessons -> units -> subjects to ensure the user is part of the department.
@@ -15,7 +15,7 @@ const getMaterialWithAuth = async (materialId, userId) => {
 exports.generateSummary = async (req, res) => {
   console.log(`[AI SUMMARY] Request received`);
   try {
-    const { materialId, provider } = req.body;
+    const { materialId, provider, forceRegenerate } = req.body;
     const userId = req.user.id;
 
     if (!materialId || !provider) {
@@ -24,14 +24,16 @@ exports.generateSummary = async (req, res) => {
 
     const material = await getMaterialWithAuth(materialId, userId);
     
-    // Check if summary already exists
-    const cachedRes = await db.query(
-      `SELECT * FROM ai_summaries WHERE material_id = $1 AND user_id = $2 AND provider = $3 ORDER BY created_at DESC LIMIT 1`,
-      [materialId, userId, provider]
-    );
-    if (cachedRes.rowCount > 0) {
-      console.log(`[AI SUMMARY] Returning cached summary from DB for ${provider}`);
-      return res.json(cachedRes.rows[0]);
+    // Check if summary already exists, unless forceRegenerate is true
+    if (!forceRegenerate) {
+      const cachedRes = await db.query(
+        `SELECT * FROM ai_summaries WHERE material_id = $1 AND user_id = $2 AND provider = $3 ORDER BY created_at DESC LIMIT 1`,
+        [materialId, userId, provider]
+      );
+      if (cachedRes.rowCount > 0) {
+        console.log(`[AI SUMMARY] Returning cached summary from DB for ${provider}`);
+        return res.json(cachedRes.rows[0]);
+      }
     }
 
     // Extract text (Download & Extract is logged inside extractTextFromMaterial)
@@ -77,6 +79,9 @@ exports.generateSummary = async (req, res) => {
   } catch (err) {
     if (err instanceof EmptyDocumentError) {
       return res.status(400).json({ success: false, message: err.message, error: 'Empty Document' });
+    }
+    if (err instanceof UnsupportedFormatError) {
+      return res.status(400).json({ success: false, message: err.message, error: 'Unsupported Format' });
     }
     if (err instanceof DownloadError) {
       return res.status(502).json({ success: false, message: err.message, error: 'Download Error' });

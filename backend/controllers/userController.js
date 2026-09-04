@@ -194,3 +194,22 @@ exports.getHierarchy = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+exports.getInstituteAdmins = async (req, res) => {
+  try {
+    const result = await db.query(`
+      SELECT u.id, u.name, u.email, i.name as institute_name 
+      FROM users u 
+      JOIN institutes i ON u.institute_id = i.id 
+      WHERE u.role = 'INSTITUTE_ADMIN'
+    `);
+    const admins = result.rows.map(admin => ({
+      id: admin.id,
+      name: `${admin.name} - ${admin.institute_name}`,
+      email: admin.email
+    }));
+    res.json(admins);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};

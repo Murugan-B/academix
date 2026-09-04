@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MessageSquare, X, Send, Bot, User, Clock, ArrowLeft, Calendar, Sparkles } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
 import api from '../api/axios';
 
 export default function AIChatbotPanel({ material, onClose }) {
@@ -166,7 +167,9 @@ export default function AIChatbotPanel({ material, onClose }) {
               {new Date(selectedHistoryItem.created_at).toLocaleString()}
             </span>
           </div>
-          <p className="whitespace-pre-wrap leading-relaxed">{selectedHistoryItem.answer}</p>
+          <div className="prose-markdown leading-relaxed">
+            <ReactMarkdown>{selectedHistoryItem.answer}</ReactMarkdown>
+          </div>
         </div>
       </div>
     </div>
@@ -189,7 +192,13 @@ export default function AIChatbotPanel({ material, onClose }) {
               {msg.role === 'user' ? <User className="w-4 h-4" /> : <Bot className="w-4 h-4" />}
             </div>
             <div className={`p-3 rounded-2xl text-sm ${msg.role === 'user' ? 'bg-indigo-600 text-white rounded-tr-sm' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-sm'}`}>
-              <p className="whitespace-pre-wrap leading-relaxed">{msg.message}</p>
+              {msg.role === 'user' ? (
+                <p className="whitespace-pre-wrap leading-relaxed">{msg.message}</p>
+              ) : (
+                <div className="prose-markdown leading-relaxed">
+                  <ReactMarkdown>{msg.message}</ReactMarkdown>
+                </div>
+              )}
             </div>
           </div>
         ))}

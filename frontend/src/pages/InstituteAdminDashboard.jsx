@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Building, Users, FileCheck, ArrowUpRight, Activity, X } from 'lucide-react';
 import api from '../api/axios';
+import CreateNotification from '../components/CreateNotification';
+import NotificationPanel from '../components/NotificationPanel';
 
 export default function InstituteAdminDashboard() {
   const [showModal, setShowModal] = useState(false);
+  const [showCreateNotification, setShowCreateNotification] = useState(false);
   const [deptName, setDeptName] = useState('');
   const [hodName, setHodName] = useState('');
   const [hodEmail, setHodEmail] = useState('');
@@ -62,6 +65,12 @@ export default function InstituteAdminDashboard() {
         </div>
         <div className="flex gap-3">
           <button 
+            onClick={() => setShowCreateNotification(true)}
+            className="px-5 py-2.5 bg-white text-indigo-600 rounded-xl font-semibold shadow-sm hover:shadow border border-indigo-100 hover:bg-indigo-50 transition-all flex items-center gap-2"
+          >
+            Create Notification
+          </button>
+          <button 
             onClick={() => setShowModal(true)}
             className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-xl font-semibold shadow-md shadow-indigo-200 hover:shadow-lg hover:opacity-90 transition-all flex items-center gap-2"
           >
@@ -93,6 +102,10 @@ export default function InstituteAdminDashboard() {
             ))}
           </div>
         )}
+      </div>
+
+      <div className="mt-8">
+        <NotificationPanel />
       </div>
 
       {/* Modal Overlay */}
@@ -139,6 +152,17 @@ export default function InstituteAdminDashboard() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Create Notification Modal */}
+      {showCreateNotification && (
+        <CreateNotification 
+          onClose={() => setShowCreateNotification(false)}
+          onSuccess={() => {
+            setShowCreateNotification(false);
+            alert('Notification sent successfully!');
+          }}
+        />
       )}
     </div>
   );

@@ -776,10 +776,10 @@ export default function SubjectDetails() {
            
            {/* AI Overlays */}
            {activeAIPanel === 'summary' && selectedMaterial && (
-             <AISummaryPanel material={selectedMaterial} onClose={() => setActiveAIPanel(null)} />
+             <AISummaryPanel material={selectedMaterial} subject={subject} onClose={() => setActiveAIPanel(null)} />
            )}
            {activeAIPanel === 'chat' && selectedMaterial && (
-             <AIChatbotPanel material={selectedMaterial} onClose={() => setActiveAIPanel(null)} />
+             <AIChatbotPanel material={selectedMaterial} subject={subject} onClose={() => setActiveAIPanel(null)} />
            )}
         </div>
 

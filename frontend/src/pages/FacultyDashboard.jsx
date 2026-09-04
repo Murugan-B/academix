@@ -3,9 +3,11 @@ import { Users, FileUp, Activity, ArrowUpRight, X, UserPlus, Bell } from 'lucide
 import { Link } from 'react-router-dom';
 import api from '../api/axios';
 import NotificationPanel from '../components/NotificationPanel';
+import CreateNotification from '../components/CreateNotification';
 
 export default function FacultyDashboard() {
   const [showModal, setShowModal] = useState(false);
+  const [showCreateNotification, setShowCreateNotification] = useState(false);
   const [studentName, setStudentName] = useState('');
   const [studentEmail, setStudentEmail] = useState('');
   const [studentPassword, setStudentPassword] = useState('');
@@ -91,13 +93,21 @@ export default function FacultyDashboard() {
         </div>
         <div className="flex gap-3">
           {isMentor && (
-            <button 
-              onClick={() => setShowModal(true)}
-              className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-xl font-semibold shadow-md shadow-indigo-200 hover:shadow-lg hover:opacity-90 transition-all flex items-center gap-2"
-            >
-              <UserPlus className="w-5 h-5" />
-              Add Student Mentee
-            </button>
+            <>
+              <button 
+                onClick={() => setShowCreateNotification(true)}
+                className="px-5 py-2.5 bg-white text-indigo-600 rounded-xl font-semibold shadow-sm hover:shadow border border-indigo-100 hover:bg-indigo-50 transition-all flex items-center gap-2"
+              >
+                Create Notification
+              </button>
+              <button 
+                onClick={() => setShowModal(true)}
+                className="px-5 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-xl font-semibold shadow-md shadow-indigo-200 hover:shadow-lg hover:opacity-90 transition-all flex items-center gap-2"
+              >
+                <UserPlus className="w-5 h-5" />
+                Add Student Mentee
+              </button>
+            </>
           )}
         </div>
       </header>
@@ -196,6 +206,17 @@ export default function FacultyDashboard() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Create Notification Modal */}
+      {showCreateNotification && (
+        <CreateNotification 
+          onClose={() => setShowCreateNotification(false)}
+          onSuccess={() => {
+            setShowCreateNotification(false);
+            alert('Notification sent successfully!');
+          }}
+        />
       )}
     </div>
   );

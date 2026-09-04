@@ -1,8 +1,15 @@
 import React, { useState, useEffect } from 'react';
-import { Sparkles, RefreshCw, X, History, ChevronRight } from 'lucide-react';
+import { Sparkles, RefreshCw, X, History, ChevronRight, Download } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import pdfMake from "pdfmake/build/pdfmake";
+import * as pdfFonts from "pdfmake/build/vfs_fonts";
+import htmlToPdfmake from "html-to-pdfmake";
 import api from '../api/axios';
 
-export default function AISummaryPanel({ material, onClose }) {
+// Initialize pdfMake fonts
+pdfMake.vfs = pdfFonts.default?.pdfMake?.vfs || pdfFonts.pdfMake?.vfs || pdfFonts.default || pdfFonts;
+
+export default function AISummaryPanel({ material, subject, onClose }) {
   const [provider, setProvider] = useState('Gemini');
   const [summary, setSummary] = useState(null);
   const [history, setHistory] = useState([]);
@@ -10,6 +17,7 @@ export default function AISummaryPanel({ material, onClose }) {
   const [loadingText, setLoadingText] = useState('Preparing material for AI...');
   const [error, setError] = useState('');
   const [view, setView] = useState('summary'); // 'summary' or 'history'
+  const [downloadingPdf, setDownloadingPdf] = useState(false);
 
   useEffect(() => {
     fetchHistory();
@@ -38,20 +46,133 @@ export default function AISummaryPanel({ material, onClose }) {
     }
   };
 
-  const generateSummary = async () => {
+  const generateSummary = async (e, isRegenerating = false) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (loading) return; // Prevent duplicate requests
+    
     setLoading(true);
     setError('');
+    
+    if (isRegenerating) {
+      console.log('[REGENERATE] request started');
+      console.log(`[REGENERATE] materialId: ${material.id}`);
+      console.log(`[REGENERATE] filename: ${material.title}`);
+      console.log(`[REGENERATE] model: ${provider}`);
+    }
+
     try {
       const res = await api.post('/ai/summarize', {
         materialId: material.id,
-        provider: provider.toLowerCase()
+        provider: provider.toLowerCase(),
+        forceRegenerate: isRegenerating
       });
+      
+      if (isRegenerating) {
+        console.log('[REGENERATE] API response received');
+        console.log(`[REGENERATE] summary length: ${res.data.summary_content?.length}`);
+      }
+      
       setSummary(res.data);
       fetchHistory(); // Refresh history
+      
+      if (isRegenerating) {
+        console.log('[REGENERATE] history saved');
+      }
     } catch (err) {
-      setError(err.response?.data?.message || err.response?.data?.error || 'Failed to generate summary.');
+      if (isRegenerating) {
+        console.error('[REGENERATE] Error:', err);
+      }
+      setError('Unable to regenerate summary. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const downloadPDF = async (e) => {
+    if (e && e.preventDefault) e.preventDefault();
+    if (downloadingPdf || !summary) return;
+    
+    setDownloadingPdf(true);
+    setError('');
+    
+    try {
+      const summaryElement = document.getElementById('ai-summary-content');
+      if (!summaryElement) throw new Error('Summary content not found');
+      
+      const htmlContent = summaryElement.innerHTML;
+      const parsedHtml = htmlToPdfmake(htmlContent, {
+        defaultStyles: {
+          p: { margin: [0, 5, 0, 10] },
+          h1: { fontSize: 18, bold: true, margin: [0, 15, 0, 10] },
+          h2: { fontSize: 16, bold: true, margin: [0, 12, 0, 8] },
+          h3: { fontSize: 14, bold: true, margin: [0, 10, 0, 5] },
+          ul: { margin: [0, 0, 0, 10] },
+          ol: { margin: [0, 0, 0, 10] },
+          strong: { bold: true }
+        }
+      });
+      
+      const docDefinition = {
+        pageSize: 'A4',
+        pageMargins: [40, 60, 40, 60],
+        header: function(currentPage, pageCount) {
+          if (currentPage === 1) return null; // Don't show header on first page
+          return {
+            text: `Academix • ${material.title} • AI Summary`,
+            alignment: 'right',
+            margin: [40, 20, 40, 0],
+            fontSize: 8,
+            color: '#64748b'
+          };
+        },
+        footer: function(currentPage, pageCount) {
+          return {
+            text: `Academix • AI Generated Summary • Page ${currentPage}`,
+            alignment: 'center',
+            margin: [0, 20, 0, 0],
+            fontSize: 9,
+            color: '#64748b'
+          };
+        },
+        content: [
+          // Title Page / Header
+          { text: 'Academix', fontSize: 18, bold: true, color: '#4f46e5', margin: [0, 0, 0, 5] },
+          { text: 'AI Generated Summary', fontSize: 13, color: '#64748b', margin: [0, 0, 0, 15] },
+          {
+            table: {
+              widths: ['auto', '*'],
+              body: [
+                [{ text: 'Subject:', bold: true, color: '#334155', border: [false, false, false, false] }, { text: subject?.name || 'Unknown', color: '#334155', border: [false, false, false, false] }],
+                [{ text: 'Material:', bold: true, color: '#334155', border: [false, false, false, false] }, { text: material.title, color: '#334155', border: [false, false, false, false] }],
+                [{ text: 'AI Model:', bold: true, color: '#334155', border: [false, false, false, false] }, { text: summary.provider, color: '#334155', border: [false, false, false, false] }],
+                [{ text: 'Generated Date:', bold: true, color: '#334155', border: [false, false, false, false] }, { text: new Date(summary.created_at).toLocaleString(), color: '#334155', border: [false, false, false, false] }]
+              ]
+            },
+            layout: 'noBorders',
+            margin: [0, 0, 0, 20]
+          },
+          { canvas: [{ type: 'line', x1: 0, y1: 0, x2: 515, y2: 0, lineWidth: 1, lineColor: '#e2e8f0' }], margin: [0, 0, 0, 20] },
+          // Parsed Markdown
+          ...parsedHtml
+        ],
+        defaultStyle: {
+          fontSize: 11,
+          color: '#334155',
+          lineHeight: 1.4
+        }
+      };
+      
+      const safeTitle = material.title.replace(/[^a-z0-9]/gi, '_').replace(/_+/g, '_');
+      const safeSubject = (subject?.name || 'Subject').replace(/[^a-z0-9]/gi, '_').replace(/_+/g, '_');
+      const filename = `Academix_${safeSubject}_${safeTitle}_AI_Summary.pdf`;
+      
+      pdfMake.createPdf(docDefinition).download(filename);
+      
+    } catch (err) {
+      console.error('PDF Generation Error:', err);
+      setError('Unable to download summary PDF. Please try again.');
+    } finally {
+      setDownloadingPdf(false);
     }
   };
 
@@ -105,14 +226,26 @@ export default function AISummaryPanel({ material, onClose }) {
                 <option value="DeepSeek">DeepSeek</option>
               </select>
             </div>
-            <button
-              onClick={generateSummary}
-              disabled={loading}
-              className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
-            >
-              <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
-              {summary ? 'Regenerate' : 'Generate Summary'}
-            </button>
+            <div className="flex items-center gap-2">
+              {summary && (
+                <button
+                  onClick={downloadPDF}
+                  disabled={loading || downloadingPdf}
+                  className="flex items-center gap-2 bg-white border border-slate-200 text-slate-700 px-4 py-2 rounded-lg text-sm font-bold hover:bg-slate-50 disabled:opacity-50 transition-colors"
+                >
+                  {downloadingPdf ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Download className="w-4 h-4" />}
+                  Download PDF
+                </button>
+              )}
+              <button
+                onClick={(e) => generateSummary(e, !!summary)}
+                disabled={loading}
+                className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              >
+                <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
+                {loading ? (summary ? 'Regenerating Summary...' : 'Generating...') : (summary ? 'Regenerate' : 'Generate Summary')}
+              </button>
+            </div>
           </div>
 
           {/* Content */}
@@ -138,8 +271,8 @@ export default function AISummaryPanel({ material, onClose }) {
                      {new Date(summary.created_at).toLocaleString()}
                    </span>
                 </div>
-                <div className="whitespace-pre-wrap leading-relaxed text-slate-700">
-                  {summary.summary_content}
+                <div id="ai-summary-content" className="prose-markdown leading-relaxed text-slate-700">
+                  <ReactMarkdown>{summary.summary_content}</ReactMarkdown>
                 </div>
               </div>
             ) : (

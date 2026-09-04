@@ -1,9 +1,12 @@
 import { useState, useEffect } from 'react';
 import { Building2, Users, FileCheck, ArrowUpRight, Activity, X } from 'lucide-react';
 import api from '../api/axios';
+import CreateNotification from '../components/CreateNotification';
+import NotificationPanel from '../components/NotificationPanel';
 
 export default function SuperAdminDashboard() {
   const [showModal, setShowModal] = useState(false);
+  const [showCreateNotification, setShowCreateNotification] = useState(false);
   
   // Form State
   const [instituteName, setInstituteName] = useState('');
@@ -64,6 +67,12 @@ export default function SuperAdminDashboard() {
           </p>
         </div>
         <div className="flex gap-3">
+          <button 
+            onClick={() => setShowCreateNotification(true)}
+            className="px-5 py-2.5 bg-white text-indigo-600 rounded-xl font-semibold shadow-sm hover:shadow border border-indigo-100 hover:bg-indigo-50 transition-all flex items-center gap-2"
+          >
+            Create Notification
+          </button>
           <button 
             onClick={() => alert('Report exporting is under development.')}
             className="px-5 py-2.5 bg-white border border-slate-200 text-slate-700 rounded-xl font-semibold shadow-sm hover:bg-slate-50 hover:shadow transition-all"
@@ -126,6 +135,10 @@ export default function SuperAdminDashboard() {
             <p className="text-5xl font-black bg-clip-text text-transparent bg-gradient-to-br from-slate-900 to-slate-600">0</p>
           </div>
         </div>
+      </div>
+
+      <div className="mt-8">
+        <NotificationPanel />
       </div>
 
       {/* Modal Overlay for Add Institute & Admin */}
@@ -221,6 +234,17 @@ export default function SuperAdminDashboard() {
             </form>
           </div>
         </div>
+      )}
+
+      {/* Create Notification Modal */}
+      {showCreateNotification && (
+        <CreateNotification 
+          onClose={() => setShowCreateNotification(false)}
+          onSuccess={() => {
+            setShowCreateNotification(false);
+            alert('Notification sent successfully!');
+          }}
+        />
       )}
     </div>
   );

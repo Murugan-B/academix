@@ -17,18 +17,25 @@ class EmptyDocumentError extends Error {
 }
 
 class DownloadError extends Error {
-  constructor(message, details) {
+  constructor(message, originalError = null) {
     super(message);
     this.name = 'DownloadError';
-    this.details = details;
+    this.originalError = originalError;
   }
 }
 
 class ExtractionError extends Error {
-  constructor(message, details) {
+  constructor(message, originalError = null) {
     super(message);
     this.name = 'ExtractionError';
-    this.details = details;
+    this.originalError = originalError;
+  }
+}
+
+class UnsupportedFormatError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'UnsupportedFormatError';
   }
 }
 
@@ -148,30 +155,23 @@ const extractTextFromMaterial = async (material) => {
       const data = await parser.getText();
       extractedText = data.text;
     } else if (ext === 'docx' || mime.includes('wordprocessingml')) {
-      const result = await officeParser.parseOffice(buffer);
+      const result = await officeParser.parseOffice(buffer, { fileType: 'docx' });
       extractedText = typeof result === 'string' ? result : (result?.toString() || '');
     } else if (ext === 'pptx' || mime.includes('presentationml')) {
-      const result = await officeParser.parseOffice(buffer);
+      const result = await officeParser.parseOffice(buffer, { fileType: 'pptx' });
       extractedText = typeof result === 'string' ? result : (result?.toString() || '');
     } else if (ext === 'doc' || mime.includes('msword')) {
+      const WordExtractor = require('word-extractor');
       const extractor = new WordExtractor();
-      extractedText = await withTempFile(buffer, 'doc', async (tempPath) => {
-        const extracted = await extractor.extract(tempPath);
-        return extracted.getBody();
-      });
+      const extracted = await extractor.extract(buffer);
+      extractedText = extracted.getBody();
     } else if (ext === 'ppt' || mime.includes('ms-powerpoint')) {
-      extractedText = await withTempFile(buffer, 'ppt', async (tempPath) => {
-        return new Promise((resolve, reject) => {
-          ppt2text(tempPath, (err, text) => {
-            if (err) reject(err);
-            else resolve(text);
-          });
-        });
-      });
+      const ppt2text = require('ppt-to-text');
+      extractedText = ppt2text.extractText(buffer);
     } else if (ext === 'txt' || mime.includes('text/plain')) {
       extractedText = buffer.toString('utf-8');
     } else {
-      throw new Error(`Unsupported file format: .${ext} (${mime}). Supported: pdf, docx, pptx, doc, ppt, txt.`);
+      throw new UnsupportedFormatError(`This file format is not supported for AI text extraction.`);
     }
 
     // Normalize whitespace — make sure it's a string first
@@ -214,7 +214,8 @@ const extractTextFromMaterial = async (material) => {
     console.error(`[AI SUMMARY] Extraction error:`, err.message);
     console.error(`[AI SUMMARY] Stack:`, err.stack);
     if (err instanceof EmptyDocumentError) throw err;
-    throw new ExtractionError(`Unable to extract text from ${ext.toUpperCase()}: ${err.message}`, err);
+    if (err instanceof UnsupportedFormatError) throw err;
+    throw new ExtractionError(`Unable to extract readable text from this material.`, err);
   }
 };
 
@@ -225,4 +226,5 @@ module.exports = {
   EmptyDocumentError,
   DownloadError,
   ExtractionError,
+  UnsupportedFormatError,
 };

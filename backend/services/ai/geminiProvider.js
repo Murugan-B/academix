@@ -9,7 +9,27 @@ class GeminiProvider extends AIProvider {
   }
 
   async summarizeContent(text) {
-    const prompt = `Summarize this academic document concisely in a few paragraphs. Focus on the key points, definitions, and important concepts.\n\nMaterial Content:\n${text}`;
+    const prompt = `Summarize this academic document in a structured, student-friendly Markdown format.
+
+Follow these strict formatting rules:
+1. Return Markdown-formatted output.
+2. Use clear headings with ## and ###.
+3. Use bullet points for lists.
+4. Use numbered lists for processes or sequences.
+5. Use **bold** for important technical terms.
+6. Keep paragraphs short.
+7. Add blank lines between sections.
+8. Do not create one huge paragraph.
+9. Preserve all important technical information from the source.
+10. Do not invent information.
+11. Do not unnecessarily repeat the same information.
+12. Make the summary easy for a college student to study and revise.
+13. Maintain the terminology used in the source material.
+
+Ensure the summary identifies the main topic, explains important concepts, and highlights key points. For PPTX, combine information across slides rather than summarizing only the first slide.
+
+Material Content:
+${text}`;
     
     try {
       const response = await this.ai.models.generateContent({

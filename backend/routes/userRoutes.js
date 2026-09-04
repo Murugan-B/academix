@@ -1,6 +1,6 @@
 const express = require('express');
 const router = express.Router();
-const { addFaculty, getFaculty, assignMentor, addStudent, getMentees, getHierarchy, getStudent, getMentors } = require('../controllers/userController');
+const { addFaculty, getFaculty, assignMentor, addStudent, getMentees, getHierarchy, getStudent, getMentors, getInstituteAdmins } = require('../controllers/userController');
 const authMiddleware = require('../middlewares/authMiddleware');
 const roleMiddleware = require('../middlewares/roleMiddleware');
 
@@ -14,5 +14,7 @@ router.get('/student/:id', authMiddleware, getStudent);
 router.get('/mentors', authMiddleware, getMentors);
 
 router.get('/hierarchy', authMiddleware, getHierarchy);
+
+router.get('/institute-admins', authMiddleware, roleMiddleware(['SUPER_ADMIN']), getInstituteAdmins);
 
 module.exports = router;
