@@ -19,6 +19,8 @@ const subjectRoutes = require('./routes/subjectRoutes');
 const academicRoutes = require('./routes/academicRoutes');
 const notificationRoutes = require('./routes/notificationRoutes');
 const aiRoutes = require('./routes/aiRoutes');
+const quizRoutes = require('./routes/quizRoutes');
+const analyticsRoutes = require('./routes/analyticsRoutes');
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -30,6 +32,8 @@ app.use('/api/resources', resourceRoutes);
 app.use('/api/subjects', subjectRoutes);
 app.use('/api/academic', academicRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/quizzes', quizRoutes);
+app.use('/api/analytics', analyticsRoutes);
 
 // Base route
 app.get('/', (req, res) => {

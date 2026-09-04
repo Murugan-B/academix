@@ -242,7 +242,6 @@ export default function SuperAdminDashboard() {
           onClose={() => setShowCreateNotification(false)}
           onSuccess={() => {
             setShowCreateNotification(false);
-            alert('Notification sent successfully!');
           }}
         />
       )}

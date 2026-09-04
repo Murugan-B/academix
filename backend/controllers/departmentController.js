@@ -4,7 +4,7 @@ const bcrypt = require('bcryptjs');
 exports.createDepartment = async (req, res) => {
   const { name, hodName, hodEmail, hodPassword } = req.body;
   // Institute admin creates it for their own institute
-  const institute_id = req.user.institute_id; 
+  const institute_id = req.user.institute_id;
 
   try {
     if (!name || !hodName || !hodEmail || !hodPassword) {
@@ -62,30 +62,6 @@ exports.assignHod = async (req, res) => {
     await db.query('UPDATE departments SET hod_id = $1 WHERE id = $2', [hod_id, department_id]);
     await db.query('UPDATE users SET role = $1, department_id = $2 WHERE id = $3', ['HOD', department_id, hod_id]);
     res.json({ message: 'HOD assigned successfully' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-};
-
-exports.getDepartmentFaculty = async (req, res) => {
-  const { id: department_id } = req.params;
-  const institute_id = req.user.institute_id;
-  
-  try {
-    // Ensure the department belongs to the same institute as the requesting user
-    const deptCheck = await db.query('SELECT institute_id FROM departments WHERE id = $1', [department_id]);
-    if (deptCheck.rowCount === 0) {
-      return res.status(404).json({ error: 'Department not found' });
-    }
-    if (deptCheck.rows[0].institute_id !== institute_id) {
-      return res.status(403).json({ error: 'Forbidden' });
-    }
-
-    const result = await db.query(
-      `SELECT id, name, email, role, designation FROM users WHERE department_id = $1 AND role = 'FACULTY'`,
-      [department_id]
-    );
-    res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

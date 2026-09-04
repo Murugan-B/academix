@@ -35,7 +35,7 @@ Ensure the summary identifies the main topic, explains important concepts, and h
 
 Material Content:
 ${text}`;
-    
+
     try {
       const response = await this.client.chat.completions.create({
         model: this.modelName,
@@ -53,7 +53,7 @@ ${text}`;
 
   async askQuestion(text, question) {
     const systemPrompt = `You are an academic learning assistant. Answer the user's question based ONLY on the provided material content below. If the answer is not available in the material, respond honestly: "I couldn't find this information in the selected material." Do not confidently invent an answer or hallucinate.`;
-    
+
     try {
       const response = await this.client.chat.completions.create({
         model: this.modelName,

@@ -160,7 +160,6 @@ export default function InstituteAdminDashboard() {
           onClose={() => setShowCreateNotification(false)}
           onSuccess={() => {
             setShowCreateNotification(false);
-            alert('Notification sent successfully!');
           }}
         />
       )}

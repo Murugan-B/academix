@@ -441,3 +441,44 @@ exports.getSignedUrl = async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 };
+
+exports.toggleMaterialProgress = async (req, res) => {
+  const { materialId } = req.params;
+  const studentId = req.user.id;
+  try {
+    const existing = await db.query(
+      'SELECT id FROM student_material_progress WHERE student_id = $1 AND material_id = $2',
+      [studentId, materialId]
+    );
+
+    if (existing.rows.length > 0) {
+      await db.query('DELETE FROM student_material_progress WHERE id = $1', [existing.rows[0].id]);
+      res.json({ status: 'uncompleted' });
+    } else {
+      await db.query(
+        'INSERT INTO student_material_progress (student_id, material_id) VALUES ($1, $2)',
+        [studentId, materialId]
+      );
+      res.json({ status: 'completed' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};
+
+exports.getMaterialProgress = async (req, res) => {
+  const { topicId } = req.params;
+  const studentId = req.user.id;
+  try {
+    const result = await db.query(
+      `SELECT p.material_id 
+       FROM student_material_progress p
+       JOIN materials m ON p.material_id = m.id
+       WHERE p.student_id = $1 AND m.topic_id = $2`,
+      [studentId, topicId]
+    );
+    res.json(result.rows.map(r => r.material_id));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+};

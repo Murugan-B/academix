@@ -121,7 +121,7 @@ export default function NotificationPanel() {
                     {activeTab === 'inbox' ? (
                       `From: ${notif.sender_name} (${notif.sender_role.replace('_', ' ')})`
                     ) : (
-                      `Target: ${notif.recipient_type.replace(/_/g, ' ')}`
+                      `Target: ${notif.target_name ? notif.target_name : notif.recipient_type.replace(/_/g, ' ')}`
                     )}
                   </span>
                 </div>

@@ -22,6 +22,24 @@ class AIProvider {
   async askQuestion(text, question) {
     throw new Error('Method askQuestion() must be implemented by subclass.');
   }
+
+  /**
+   * Generates a quiz from the provided academic text.
+   * @param {string} text - The extracted text from the material.
+   * @returns {Promise<Array>} Array of quiz question objects.
+   */
+  async generateQuiz(text) {
+    throw new Error('Method generateQuiz() must be implemented by subclass.');
+  }
+
+  /**
+   * Generates a personalized AI recommendation based on quiz stats.
+   * @param {object} stats - The student's quiz performance stats.
+   * @returns {Promise<string>} The recommendation text.
+   */
+  async generateRecommendation(stats) {
+    throw new Error('Method generateRecommendation() must be implemented by subclass.');
+  }
 }
 
 module.exports = AIProvider;

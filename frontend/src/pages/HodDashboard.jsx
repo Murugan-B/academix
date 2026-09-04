@@ -183,7 +183,6 @@ export default function HodDashboard() {
           onClose={() => setShowCreateNotification(false)}
           onSuccess={() => {
             setShowCreateNotification(false);
-            alert('Notification sent successfully!');
           }}
         />
       )}

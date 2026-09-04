@@ -1,18 +1,21 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronRight, ChevronDown, Plus, Trash2, FileText, Download, UploadCloud, ArrowLeft, BookOpen, AlertCircle, Search, Sparkles, MessageSquare } from 'lucide-react';
+import { ChevronRight, ChevronDown, Plus, Trash2, FileText, Download, UploadCloud, ArrowLeft, BookOpen, AlertCircle, Search, Sparkles, MessageSquare, CheckCircle, BrainCircuit } from 'lucide-react';
 import api from '../api/axios';
 import UploadMaterialModal from '../components/UploadMaterialModal';
 import AddHierarchyModal from '../components/AddHierarchyModal';
 import AISummaryPanel from '../components/AISummaryPanel';
 import AIChatbotPanel from '../components/AIChatbotPanel';
 
-function MaterialViewer({ material, onDownload, onOpenSummary, onOpenChat }) {
+function MaterialViewer({ material, onDownload, onOpenSummary, onOpenChat, onOpenQuiz }) {
   const [blobUrl, setBlobUrl] = useState(null);
   const [officeUrl, setOfficeUrl] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(false);
   const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [isCompleted, setIsCompleted] = useState(false);
+  const [quizInfo, setQuizInfo] = useState(null);
+  const [generatingQuiz, setGeneratingQuiz] = useState(false);
 
   useEffect(() => {
     if (!material) return;
@@ -51,6 +54,20 @@ function MaterialViewer({ material, onDownload, onOpenSummary, onOpenChat }) {
       // Unpreviewable type
       setLoading(false);
     }
+    
+    // Fetch progress and quiz info
+    api.get(`/academic/topics/${material.topic_id}/progress`)
+      .then(res => {
+        setIsCompleted(!!res.data[material.id]);
+      })
+      .catch(console.error);
+
+    api.get(`/quizzes/material/${material.id}`)
+      .then(res => setQuizInfo(res.data))
+      .catch(err => {
+        if (err.response?.status === 404) setQuizInfo(null);
+        else console.error(err);
+      });
 
     return () => {
       if (currentUrl) {
@@ -58,6 +75,29 @@ function MaterialViewer({ material, onDownload, onOpenSummary, onOpenChat }) {
       }
     };
   }, [material]);
+
+  const toggleComplete = async () => {
+    try {
+      const res = await api.post(`/academic/materials/${material.id}/progress`);
+      setIsCompleted(res.data.completed);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const generateQuiz = async () => {
+    setGeneratingQuiz(true);
+    try {
+      const res = await api.post(`/quizzes/material/${material.id}/generate`);
+      // Backend returns 200 whether quiz was just created or already existed.
+      // res.data.quizId is always present.
+      setQuizInfo({ id: res.data.quizId, question_count: res.data.questionCount });
+    } catch (err) {
+      alert(err.message || 'Unable to generate quiz. Please try again.');
+    } finally {
+      setGeneratingQuiz(false);
+    }
+  };
 
   if (!material) {
     return (
@@ -159,9 +199,33 @@ function MaterialViewer({ material, onDownload, onOpenSummary, onOpenChat }) {
             <span>{(material.file_size / 1024 / 1024).toFixed(2)} MB</span>
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap gap-2 justify-end">
+          <button
+            onClick={toggleComplete}
+            className={`px-4 py-2 font-bold rounded-lg shadow-sm flex items-center gap-2 transition-all active:scale-95 text-sm ${isCompleted ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200' : 'bg-slate-100 text-slate-700 hover:bg-slate-200'}`}
+          >
+            <CheckCircle className="w-4 h-4" /> {isCompleted ? 'Completed ✓' : 'Mark as Complete'}
+          </button>
+          
           {['pdf', 'txt', 'ppt', 'pptx', 'doc', 'docx'].includes(ext) && (
             <>
+              {quizInfo ? (
+                <button
+                  onClick={() => onOpenQuiz(quizInfo)}
+                  className="px-4 py-2 bg-purple-50 text-purple-700 font-bold rounded-lg hover:bg-purple-100 shadow-sm flex items-center gap-2 transition-all active:scale-95 text-sm"
+                >
+                  <BrainCircuit className="w-4 h-4" /> Start Quiz
+                </button>
+              ) : (
+                <button
+                  onClick={generateQuiz}
+                  disabled={generatingQuiz}
+                  className="px-4 py-2 bg-purple-50 text-purple-700 font-bold rounded-lg hover:bg-purple-100 shadow-sm flex items-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-50"
+                >
+                  <BrainCircuit className="w-4 h-4" /> {generatingQuiz ? 'Generating quiz...' : 'Generate Quiz'}
+                </button>
+              )}
+              
               <button
                 onClick={onOpenSummary}
                 className="px-4 py-2 bg-indigo-50 text-indigo-700 font-bold rounded-lg hover:bg-indigo-100 shadow-sm flex items-center gap-2 transition-all active:scale-95 text-sm"
@@ -668,6 +732,7 @@ export default function SubjectDetails() {
   const [searchQuery, setSearchQuery] = useState('');
   
   const [activeAIPanel, setActiveAIPanel] = useState(null); // 'summary', 'chat', or null
+  const [chatMaterial, setChatMaterial] = useState(null);
 
   // Role detection
   const userStr = localStorage.getItem('user');
@@ -771,15 +836,25 @@ export default function SubjectDetails() {
              material={selectedMaterial} 
              onDownload={handleDownload} 
              onOpenSummary={() => setActiveAIPanel('summary')}
-             onOpenChat={() => setActiveAIPanel('chat')}
+             onOpenChat={() => setChatMaterial(selectedMaterial)}
+             onOpenQuiz={(info) => {
+               // Navigate to full-screen quiz page, passing context via state
+               navigate(`/quiz/${selectedMaterial.id}`, {
+                 state: {
+                   subjectId,
+                   subjectName: subject?.name,
+                   materialTitle: selectedMaterial?.title,
+                 }
+               });
+             }}
            />
            
            {/* AI Overlays */}
            {activeAIPanel === 'summary' && selectedMaterial && (
              <AISummaryPanel material={selectedMaterial} subject={subject} onClose={() => setActiveAIPanel(null)} />
            )}
-           {activeAIPanel === 'chat' && selectedMaterial && (
-             <AIChatbotPanel material={selectedMaterial} subject={subject} onClose={() => setActiveAIPanel(null)} />
+           {chatMaterial && (
+             <AIChatbotPanel material={chatMaterial} onClose={() => setChatMaterial(null)} />
            )}
         </div>
 

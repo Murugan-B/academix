@@ -63,6 +63,34 @@ class AIService {
 
     return provider.askQuestion(contextText, question);
   }
+
+  async generateQuiz(providerName, text) {
+    const provider = this.getProvider(providerName);
+    let contextText = text;
+    if (text.length > CHUNK_SIZE * 2) {
+       contextText = text.slice(0, CHUNK_SIZE * 2) + "\\n\\n[Note: Document was truncated due to length limits.]";
+    }
+    return provider.generateQuiz(contextText);
+  }
+
+  async generateMoreQuestions(providerName, text, existingQuestionsText) {
+    const provider = this.getProvider(providerName);
+    let contextText = text;
+    if (text.length > CHUNK_SIZE * 2) {
+       contextText = text.slice(0, CHUNK_SIZE * 2) + "\\n\\n[Note: Document was truncated due to length limits.]";
+    }
+    // Only Gemini has this explicitly implemented currently, but standard interface requires it
+    if (typeof provider.generateMoreQuestions === 'function') {
+      return provider.generateMoreQuestions(contextText, existingQuestionsText);
+    }
+    // Fallback if provider doesn't implement it
+    return provider.generateQuiz(contextText);
+  }
+
+  async generateRecommendation(providerName, stats) {
+    const provider = this.getProvider(providerName);
+    return provider.generateRecommendation(stats);
+  }
 }
 
 // Export as singleton

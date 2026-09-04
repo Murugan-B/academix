@@ -214,7 +214,6 @@ export default function FacultyDashboard() {
           onClose={() => setShowCreateNotification(false)}
           onSuccess={() => {
             setShowCreateNotification(false);
-            alert('Notification sent successfully!');
           }}
         />
       )}

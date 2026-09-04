@@ -10,11 +10,16 @@ import HodDashboard from './pages/HodDashboard';
 import FacultyDashboard from './pages/FacultyDashboard';
 import StudentDashboard from './pages/StudentDashboard';
 import StudentDetails from './pages/StudentDetails';
+import QuizPage from './pages/QuizPage';
+import AttemptReviewPage from './pages/AttemptReviewPage';
 import Layout from './components/layout/Layout';
+import ToastContainer from './components/Toast';
 
 function App() {
   return (
-    <Routes>
+    <>
+      <ToastContainer />
+      <Routes>
       <Route path="/login" element={<Login />} />
       
       <Route path="/" element={<Layout />}>
@@ -28,11 +33,16 @@ function App() {
         <Route path="settings" element={<Settings />} />
         <Route path="subjects" element={<Subjects />} />
         <Route path="subjects/:subjectId" element={<SubjectDetails />} />
+        <Route path="attempt-review/:attemptId" element={<AttemptReviewPage />} />
         <Route index element={<Navigate to="/login" replace />} />
       </Route>
       
+      {/* Full-screen quiz page — outside Layout so no sidebar/header renders */}
+      <Route path="/quiz/:materialId" element={<QuizPage />} />
+
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
+    </>
   );
 }
 

@@ -9,7 +9,8 @@ const {
   getLessons, createLesson, updateLesson, deleteLesson,
   getTopics, createTopic, updateTopic, deleteTopic,
   getMaterials, uploadMaterial, deleteMaterial,
-  viewMaterial, downloadMaterial, getSignedUrl
+  viewMaterial, downloadMaterial, getSignedUrl,
+  toggleMaterialProgress, getMaterialProgress
 } = require('../controllers/academicController');
 
 const facultyOrHod = roleMiddleware(['HOD', 'FACULTY']);
@@ -73,5 +74,11 @@ router.get('/materials/:materialId/signed-url', authMiddleware, anyRole, validat
 
 // DELETE /api/academic/materials/:materialId
 router.delete('/materials/:materialId', authMiddleware, facultyOrHod, validateHierarchy, deleteMaterial);
+
+// POST /api/academic/materials/:materialId/progress
+router.post('/materials/:materialId/progress', authMiddleware, anyRole, toggleMaterialProgress);
+
+// GET /api/academic/topics/:topicId/progress
+router.get('/topics/:topicId/progress', authMiddleware, anyRole, getMaterialProgress);
 
 module.exports = router;

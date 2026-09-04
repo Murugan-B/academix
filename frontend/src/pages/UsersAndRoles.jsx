@@ -210,26 +210,73 @@ export default function UsersAndRoles() {
               All Students
             </button>
           </div>
-          
+
           <div className="p-8">
-            <div className="grid gap-3">
-              {data.users?.filter(u => u.role === activeHodTab).length === 0 ? (
-                <p className="text-slate-400 italic text-sm py-4">No {activeHodTab.toLowerCase()} found.</p>
-              ) : (
-                data.users?.filter(u => u.role === activeHodTab).map(user => (
-                  <div key={user.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50 flex justify-between items-center hover:bg-white transition-colors">
-                    <div>
-                      <p className="font-bold text-slate-800 flex items-center gap-2">
-                        {user.name} 
-                        {user.is_mentor && <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-[10px] rounded-full uppercase tracking-wider">Mentor</span>}
-                      </p>
-                      <p className="text-xs text-slate-500">{user.email}</p>
+            {/* FACULTY sub-view */}
+            {activeHodTab === 'FACULTY' && (() => {
+              const faculty = data.users?.filter(u => u.role === 'FACULTY') ?? [];
+              if (faculty.length === 0) return <p className="text-slate-400 italic text-sm py-4">No faculty found.</p>;
+              return (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {faculty.map(user => (
+                    <div key={user.id} className="p-4 rounded-xl border border-slate-100 bg-slate-50 flex justify-between items-center hover:bg-white transition-colors">
+                      <div>
+                        <p className="font-bold text-slate-800 flex items-center gap-2">
+                          {user.name}
+                          {user.is_mentor && (
+                            <span className="px-2 py-0.5 bg-indigo-100 text-indigo-700 text-[10px] rounded-full uppercase tracking-wider">Mentor</span>
+                          )}
+                        </p>
+                        <p className="text-xs text-slate-500">{user.email}</p>
+                      </div>
+                      <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">{user.designation || 'Faculty'}</span>
                     </div>
-                    <span className="text-xs font-bold text-slate-400 uppercase tracking-wider">{user.designation || 'Student'}</span>
-                  </div>
-                ))
-              )}
-            </div>
+                  ))}
+                </div>
+              );
+            })()}
+
+            {/* STUDENTS sub-view — role is 'STUDENT' (singular), not 'STUDENTS' */}
+            {activeHodTab === 'STUDENTS' && (() => {
+              const students = data.users?.filter(u => u.role === 'STUDENT') ?? [];
+              if (students.length === 0) return (
+                <div className="text-center py-16 text-slate-400">
+                  <GraduationCap className="w-10 h-10 mx-auto mb-3 opacity-40" />
+                  <p className="font-medium">No students found in this department.</p>
+                </div>
+              );
+              return (
+                <div className="grid gap-3 md:grid-cols-2">
+                  {students.map(student => (
+                    <button
+                      key={student.id}
+                      onClick={() => navigate(`/students/${student.id}`)}
+                      className="text-left p-4 rounded-xl border border-slate-100 bg-slate-50 hover:bg-indigo-50 hover:border-indigo-200 transition-all group active:scale-[0.99] w-full"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-full bg-gradient-to-br from-indigo-100 to-violet-100 text-indigo-600 flex items-center justify-center font-bold text-base shadow-inner border border-white shrink-0">
+                            {student.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="font-bold text-slate-800 group-hover:text-indigo-700 transition-colors truncate">{student.name}</p>
+                            <div className="flex items-center gap-2 flex-wrap mt-0.5">
+                              {student.roll_number && (
+                                <span className="text-xs text-slate-500 font-medium">{student.roll_number}</span>
+                              )}
+                              {student.batch_start_year && (
+                                <span className="text-xs text-slate-400">· {student.batch_start_year}–{student.batch_end_year}</span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                        <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-indigo-400 group-hover:translate-x-0.5 transition-all shrink-0 ml-2" />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </div>
       )}
