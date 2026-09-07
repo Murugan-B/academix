@@ -299,6 +299,7 @@ export default function AIChatbotPanel({ material, onClose }) {
               >
                 <option value="Local">Local (Ollama)</option>
                 <option value="Gemini">Gemini</option>
+                <option value="OpenRouter">OpenRouter</option>
                 <option value="DeepSeek">DeepSeek</option>
               </select>
             </>

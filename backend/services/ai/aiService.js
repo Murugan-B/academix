@@ -1,6 +1,7 @@
 const GeminiProvider = require('./geminiProvider');
 const DeepSeekProvider = require('./deepseekProvider');
 const LocalProvider = require('./localProvider');
+const OpenRouterProvider = require('./openRouterProvider');
 
 const CHUNK_SIZE = 25000; // Character limit per chunk (approx 5000 tokens)
 
@@ -19,7 +20,8 @@ class AIService {
     this.providers = {
       gemini: new GeminiProvider(),
       deepseek: new DeepSeekProvider(),
-      local: new LocalProvider()
+      local: new LocalProvider(),
+      openrouter: new OpenRouterProvider()
     };
   }
 

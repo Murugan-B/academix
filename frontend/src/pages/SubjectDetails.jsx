@@ -16,6 +16,7 @@ function MaterialViewer({ material, onDownload, onOpenSummary, onOpenChat, onOpe
   const [isCompleted, setIsCompleted] = useState(false);
   const [quizInfo, setQuizInfo] = useState(null);
   const [generatingQuiz, setGeneratingQuiz] = useState(false);
+  const [quizProvider, setQuizProvider] = useState('gemini');
 
   useEffect(() => {
     if (!material) return;
@@ -88,12 +89,10 @@ function MaterialViewer({ material, onDownload, onOpenSummary, onOpenChat, onOpe
   const generateQuiz = async () => {
     setGeneratingQuiz(true);
     try {
-      const res = await api.post(`/quizzes/material/${material.id}/generate`);
-      // Backend returns 200 whether quiz was just created or already existed.
-      // res.data.quizId is always present.
+      const res = await api.post(`/quizzes/material/${material.id}/generate`, { provider: quizProvider });
       setQuizInfo({ id: res.data.quizId, question_count: res.data.questionCount });
     } catch (err) {
-      alert(err.message || 'Unable to generate quiz. Please try again.');
+      alert(err.response?.data?.error || err.message || 'Unable to generate quiz. Please try again.');
     } finally {
       setGeneratingQuiz(false);
     }
@@ -217,13 +216,25 @@ function MaterialViewer({ material, onDownload, onOpenSummary, onOpenChat, onOpe
                   <BrainCircuit className="w-4 h-4" /> Start Quiz
                 </button>
               ) : (
-                <button
-                  onClick={generateQuiz}
-                  disabled={generatingQuiz}
-                  className="px-4 py-2 bg-purple-50 text-purple-700 font-bold rounded-lg hover:bg-purple-100 shadow-sm flex items-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-50"
-                >
-                  <BrainCircuit className="w-4 h-4" /> {generatingQuiz ? 'Generating quiz...' : 'Generate Quiz'}
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <select
+                    value={quizProvider}
+                    onChange={(e) => setQuizProvider(e.target.value)}
+                    className="bg-purple-50 border border-purple-200 text-xs font-bold text-purple-700 rounded-lg px-2 py-2 outline-none focus:ring-2 focus:ring-purple-400"
+                  >
+                    <option value="gemini">Gemini</option>
+                    <option value="openrouter">OpenRouter</option>
+                    <option value="local">Local (Ollama)</option>
+                    <option value="deepseek">DeepSeek</option>
+                  </select>
+                  <button
+                    onClick={generateQuiz}
+                    disabled={generatingQuiz}
+                    className="px-4 py-2 bg-purple-50 text-purple-700 font-bold rounded-lg hover:bg-purple-100 shadow-sm flex items-center gap-2 transition-all active:scale-95 text-sm disabled:opacity-50"
+                  >
+                    <BrainCircuit className="w-4 h-4" /> {generatingQuiz ? 'Generating...' : 'Generate Quiz'}
+                  </button>
+                </div>
               )}
               
               <button

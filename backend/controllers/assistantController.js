@@ -223,6 +223,13 @@ exports.uploadAttachment = async (req, res) => {
 };
 
 exports.sendMessage = async (req, res) => {
+  let clientDisconnected = false;
+  res.on('close', () => {
+    if (!res.writableEnded) {
+      clientDisconnected = true;
+    }
+  });
+
   try {
     const userId = req.user.id;
     const { id: conversationId } = req.params;
@@ -232,7 +239,7 @@ exports.sendMessage = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Message content is required.' });
     }
 
-    const allowedProviders = ['local', 'gemini', 'deepseek'];
+    const allowedProviders = ['local', 'gemini', 'deepseek', 'openrouter'];
     if (!allowedProviders.includes(provider.toLowerCase())) {
       return res.status(400).json({ success: false, message: `Invalid provider '${provider}'. Allowed providers: ${allowedProviders.join(', ')}` });
     }
@@ -311,6 +318,12 @@ exports.sendMessage = async (req, res) => {
       contextText = texts.join('\n\n');
     }
 
+    // Bail out early if client already disconnected before AI generation
+    if (clientDisconnected) {
+      console.log(`[AI][${provider}] Client disconnected before AI generation — skipping.`);
+      return;
+    }
+
     // Generate response via AI Service
     let assistantReply = '';
     try {
@@ -323,6 +336,11 @@ exports.sendMessage = async (req, res) => {
         mimeType
       );
     } catch (aiErr) {
+      // If client disconnected during generation, suppress the error
+      if (clientDisconnected) {
+        console.log(`[AI][${provider}] Generation cancelled (client disconnected).`);
+        return;
+      }
       console.error(`AI Generation Error (${provider}):`, aiErr.message);
       let userFriendlyMessage = aiErr.message;
       if (provider === 'local') {
@@ -331,8 +349,16 @@ exports.sendMessage = async (req, res) => {
         userFriendlyMessage = `Gemini API request failed. Please check backend GEMINI_API_KEY environment variable. Error: ${aiErr.message}`;
       } else if (provider === 'deepseek') {
         userFriendlyMessage = `DeepSeek API request failed. Please check backend DEEPSEEK_API_KEY environment variable. Error: ${aiErr.message}`;
+      } else if (provider === 'openrouter') {
+        userFriendlyMessage = `OpenRouter request failed. Please check OPENROUTER_API_KEY. Error: ${aiErr.message}`;
       }
       return res.status(500).json({ success: false, message: userFriendlyMessage, error: aiErr.message });
+    }
+
+    // If client disconnected after generation completed, skip saving incomplete state
+    if (clientDisconnected) {
+      console.log(`[AI][${provider}] Response generated but client disconnected — not saving assistant message.`);
+      return;
     }
 
     // Save assistant message to DB
@@ -342,7 +368,7 @@ exports.sendMessage = async (req, res) => {
       [conversationId, assistantReply, provider]
     );
 
-    // Update message_id on recent attachment if relevant
+    // Update message_id on attachment if relevant
     if (attachmentId) {
       await db.query(
         `UPDATE ai_chat_attachments SET message_id = $1 WHERE id = $2 AND conversation_id = $3`,
@@ -356,10 +382,12 @@ exports.sendMessage = async (req, res) => {
       conversationTitle: updatedTitle
     });
   } catch (err) {
+    if (clientDisconnected) return; // suppress errors after client disconnect
     console.error('Send message error:', err);
     res.status(500).json({ success: false, message: err.message || 'Failed to process message' });
   }
 };
+
 
 exports.getProvidersStatus = async (req, res) => {
   try {
@@ -374,14 +402,23 @@ exports.getProvidersStatus = async (req, res) => {
 
     const geminiAvailable = !!process.env.GEMINI_API_KEY;
     const deepseekAvailable = !!process.env.DEEPSEEK_API_KEY;
+    const openrouterKey = process.env.OPENROUTER_API_KEY || '';
+    const openrouterAvailable = !!(openrouterKey && openrouterKey.trim() && openrouterKey !== 'your_openrouter_api_key_here');
 
     res.json({
       local: { status: localOnline ? 'available' : 'unavailable', label: 'Ollama (Local)' },
       gemini: { status: geminiAvailable ? 'available' : 'unavailable', label: 'Gemini' },
-      deepseek: { status: deepseekAvailable ? 'available' : 'unavailable', label: 'DeepSeek' }
+      deepseek: { status: deepseekAvailable ? 'available' : 'unavailable', label: 'DeepSeek' },
+      openrouter: {
+        status: openrouterAvailable ? 'available' : 'unavailable',
+        label: 'OpenRouter',
+        model: process.env.OPENROUTER_MODEL || 'openrouter/auto',
+        configured: openrouterAvailable
+      }
     });
   } catch (err) {
     console.error('Providers status error:', err);
     res.status(500).json({ success: false, message: 'Failed to check AI providers status' });
   }
 };
+
