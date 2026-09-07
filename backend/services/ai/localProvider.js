@@ -232,6 +232,103 @@ Be direct, specific, and encouraging. Do not use generic phrases.`;
     const rawResponse = await this._generateResponse(fullPrompt);
     return rawResponse.trim();
   }
+
+  async generateLearningContent(topic, materialText, wrongQuestions = [], meta = {}) {
+    let wrongQuestionsBlock = '';
+    if (wrongQuestions && wrongQuestions.length > 0) {
+      wrongQuestionsBlock = `\nSTUDENT'S PREVIOUS INCORRECT QUESTIONS IN THIS TOPIC:\n` +
+        wrongQuestions.map((q, idx) => `Question ${idx + 1}: ${q.question}\nSelected (Wrong): ${q.selected_answer || 'N/A'}\nCorrect: ${q.correct_answer || 'N/A'}\nExplanation: ${q.explanation || ''}`).join('\n\n');
+    }
+
+    const prompt = `You are Academix AI, an academic tutor. Generate grounded personalized learning content for the topic "${topic}" in strict JSON format only.
+
+SOURCE ACADEMIC MATERIAL:
+${materialText}
+${wrongQuestionsBlock}
+
+Return ONLY valid JSON matching this schema:
+{
+  "topic": "${topic}",
+  "difficulty": "Medium",
+  "whyWeak": "Summary of concept weakness",
+  "simpleExplanation": "Clear conceptual explanation in 2-3 paragraphs",
+  "whyItMatters": "Academic significance",
+  "importantConcepts": [
+    { "concept": "Concept Name", "description": "Brief description" }
+  ],
+  "importantPoints": [
+    "Key point 1",
+    "Key point 2"
+  ],
+  "importantSubtopics": [
+    { "title": "Subtopic Title", "keyPoint": "Key takeaway" }
+  ],
+  "materialBasedLearning": {
+    "sourceType": "${meta.fileType || 'Material'}",
+    "slidesOrSections": [
+      {
+        "title": "Section Title",
+        "reference": "Section Reference",
+        "keyTakeaway": "Key takeaway"
+      }
+    ]
+  },
+  "examples": [
+    {
+      "title": "Example",
+      "problem": "Problem",
+      "solution": "Solution",
+      "explanation": "Why correct"
+    }
+  ],
+  "stepByStep": [
+    { "step": 1, "title": "Step 1", "description": "Details" }
+  ],
+  "commonMistakes": [
+    {
+      "mistake": "Mistake",
+      "whyWrong": "Why wrong",
+      "howToFix": "How to fix"
+    }
+  ],
+  "quickRevision": [
+    "Point 1",
+    "Point 2"
+  ],
+  "practiceQuestions": [
+    {
+      "id": 1,
+      "question": "Practice question?",
+      "options": ["A", "B", "C", "D"],
+      "correctAnswerIndex": 0,
+      "explanation": "Explanation"
+    },
+    {
+      "id": 2,
+      "question": "Practice question 2?",
+      "options": ["A", "B", "C", "D"],
+      "correctAnswerIndex": 1,
+      "explanation": "Explanation"
+    },
+    {
+      "id": 3,
+      "question": "Practice question 3?",
+      "options": ["A", "B", "C", "D"],
+      "correctAnswerIndex": 2,
+      "explanation": "Explanation"
+    }
+  ]
+}`;
+
+    const rawResponse = await this._generateResponse(prompt, true);
+    try {
+      const cleaned = (rawResponse || '').trim().replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
+      return JSON.parse(cleaned);
+    } catch (error) {
+      console.error('LocalProvider generateLearningContent JSON parse error:', error);
+      throw new Error('Failed to generate valid learning content from local model.');
+    }
+  }
 }
 
 module.exports = LocalProvider;

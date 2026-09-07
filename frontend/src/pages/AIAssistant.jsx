@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Bot, User, Send, Plus, Trash2, Search, Paperclip, X, FileText,
   Sparkles, AlertCircle, RefreshCw, CheckCircle2, HelpCircle, BookOpen,
-  Layers, StopCircle, Image as ImageIcon, ZoomIn
+  Layers, StopCircle, Image as ImageIcon, ZoomIn, PanelLeftClose, PanelLeftOpen, Menu
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import api from '../api/axios';
@@ -58,8 +58,8 @@ function AttachmentCard({ attachment, compact = false, onClick }) {
           className="w-full object-cover max-h-32 group-hover:opacity-90 transition-opacity"
         />
         <div className="px-2 py-1.5">
-          <p className="text-[10px] font-bold truncate">{attachment.file_name}</p>
-          <p className="text-[10px] opacity-70">{ext} {size && `• ${size}`}</p>
+          <p className="text-[11px] font-semibold text-white truncate">{attachment.file_name}</p>
+          <p className="text-[9px] text-white/70">{size}</p>
         </div>
       </div>
     );
@@ -67,15 +67,23 @@ function AttachmentCard({ attachment, compact = false, onClick }) {
 
   return (
     <div
-      className="flex items-center gap-2.5 rounded-2xl border border-white/20 px-3 py-2.5 bg-black/10 shadow-sm max-w-[220px]"
+      className={`flex items-center gap-2.5 p-2.5 rounded-2xl border ${compact ? 'w-44' : 'w-52'} ${
+        compact
+          ? 'bg-slate-50 border-slate-200'
+          : 'bg-white/10 border-white/20 backdrop-blur-sm'
+      }`}
       title={attachment.file_name}
     >
-      <div className="p-2 rounded-xl bg-white/20 shrink-0">
+      <div className={`p-2 rounded-xl shrink-0 ${compact ? 'bg-indigo-50 text-indigo-600' : 'bg-white/20 text-white'}`}>
         <FileText className="w-4 h-4" />
       </div>
-      <div className="truncate">
-        <p className="text-[11px] font-bold truncate">{attachment.file_name}</p>
-        <p className="text-[10px] opacity-70">{ext}{size ? ` • ${size}` : ''}</p>
+      <div className="truncate min-w-0">
+        <p className={`text-xs font-bold truncate ${compact ? 'text-slate-800' : 'text-white'}`}>
+          {attachment.file_name}
+        </p>
+        <p className={`text-[10px] font-medium ${compact ? 'text-slate-400' : 'text-white/70'}`}>
+          {ext} {size ? `• ${size}` : ''}
+        </p>
       </div>
     </div>
   );
@@ -83,9 +91,10 @@ function AttachmentCard({ attachment, compact = false, onClick }) {
 
 // ─── Image Preview Modal ─────────────────────────────────────────────────────
 function ImagePreviewModal({ url, name, onClose }) {
+  if (!url) return null;
   return (
     <div
-      className="fixed inset-0 bg-black/80 z-[9999] flex items-center justify-center p-4"
+      className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-in fade-in duration-200"
       onClick={onClose}
     >
       <div className="relative max-w-3xl max-h-[90vh] w-full" onClick={e => e.stopPropagation()}>
@@ -117,7 +126,7 @@ export default function AIAssistant() {
   const [providersStatus, setProvidersStatus] = useState({
     local: { status: 'available', label: 'Ollama (Local)' },
     gemini: { status: 'unavailable', label: 'Gemini' },
-    openrouter: { status: 'unavailable', label: 'OpenRouter', model: 'meta-llama/llama-3.1-8b-instruct:free' },
+    openrouter: { status: 'unavailable', label: 'OpenRouter', model: 'openrouter/free' },
     deepseek: { status: 'unavailable', label: 'DeepSeek' }
   });
 
@@ -127,6 +136,10 @@ export default function AIAssistant() {
   const [pendingAttachment, setPendingAttachment] = useState(null);
   const [deleteModalConv, setDeleteModalConv] = useState(null);
   const [previewImage, setPreviewImage] = useState(null);
+
+  // Independent Chat History sidebar state for AI Assistant
+  const [isChatHistoryOpen, setIsChatHistoryOpen] = useState(true);
+  const [isMobileSidebarOpen, setIsMobileSidebarOpen] = useState(false);
 
   // AbortController ref for cancellation
   const abortControllerRef = useRef(null);
@@ -454,110 +467,220 @@ export default function AIAssistant() {
 
   // ── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div className="h-[calc(100vh-7rem)] flex bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.06)] border border-slate-100 overflow-hidden animate-in fade-in duration-500">
+    <div className="h-full w-full flex bg-white overflow-hidden relative">
 
-      {/* LEFT SIDEBAR */}
-      <aside className="w-80 bg-slate-50/70 border-r border-slate-200/80 flex flex-col shrink-0">
-        <div className="p-4 border-b border-slate-200/60 flex flex-col gap-3 shrink-0">
+      {/* MOBILE BACKDROP */}
+      {isMobileSidebarOpen && (
+        <div
+          className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-40 md:hidden"
+          onClick={() => setIsMobileSidebarOpen(false)}
+        />
+      )}
+
+      {/* MOBILE DRAWER SIDEBAR */}
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-slate-50 border-r border-slate-200 shadow-2xl flex flex-col transition-transform duration-300 md:hidden ${
+        isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+      }`}>
+        <div className="p-4 border-b border-slate-200/80 flex items-center justify-between">
+          <h3 className="font-extrabold text-sm text-slate-800 flex items-center gap-2">
+            <Bot className="w-4 h-4 text-indigo-600" /> Chat History
+          </h3>
           <button
-            onClick={createNewChat}
-            className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold py-3 px-4 rounded-2xl shadow-md shadow-indigo-100 transition-all active:scale-[0.98]"
+            onClick={() => setIsMobileSidebarOpen(false)}
+            className="p-1 text-slate-400 hover:text-slate-700 rounded-lg"
           >
-            <Plus className="w-5 h-5" />
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        <div className="p-3 border-b border-slate-200/60 flex flex-col gap-2.5">
+          <button
+            onClick={() => {
+              createNewChat();
+              setIsMobileSidebarOpen(false);
+            }}
+            className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-bold py-2.5 px-3 rounded-xl shadow-sm text-xs"
+          >
+            <Plus className="w-4 h-4" />
             <span>New Chat</span>
           </button>
-
           <div className="relative">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search chats..."
-              className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              placeholder="Search..."
+              className="w-full bg-white border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-700 outline-none"
             />
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
-          {filteredConversations.length === 0 ? (
-            <div className="text-center py-10 text-slate-400">
-              <Bot className="w-8 h-8 mx-auto mb-2 opacity-50" />
-              <p className="text-xs font-medium">No chats found.</p>
-            </div>
-          ) : (
-            filteredConversations.map(conv => {
-              const isActive = conv.id === activeConvId;
-              return (
-                <div
-                  key={conv.id}
-                  onClick={() => setActiveConvId(conv.id)}
-                  className={`group relative flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all ${
-                    isActive
-                      ? 'bg-indigo-50 border border-indigo-200/80 shadow-sm text-indigo-900 font-semibold'
-                      : 'hover:bg-white text-slate-700 border border-transparent hover:border-slate-200/60 font-medium'
-                  }`}
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
+          {filteredConversations.map(conv => {
+            const isActive = conv.id === activeConvId;
+            return (
+              <div
+                key={conv.id}
+                onClick={() => {
+                  setActiveConvId(conv.id);
+                  setIsMobileSidebarOpen(false);
+                }}
+                className={`flex items-center justify-between p-2.5 rounded-xl cursor-pointer text-xs ${
+                  isActive ? 'bg-indigo-50 text-indigo-900 font-bold' : 'text-slate-700 hover:bg-white font-medium'
+                }`}
+              >
+                <span className="truncate pr-2">{conv.title}</span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setDeleteModalConv(conv);
+                  }}
+                  className="p-1 text-slate-400 hover:text-rose-600 rounded"
                 >
-                  <div className="flex items-center gap-2.5 truncate pr-6">
-                    <Bot className={`w-4 h-4 shrink-0 ${isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
-                    <span className="text-xs truncate">{conv.title}</span>
-                  </div>
-
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setDeleteModalConv(conv);
-                    }}
-                    className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all absolute right-2"
-                    title="Delete Chat"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        <div className="p-3 border-t border-slate-200/60 bg-white/50 text-xs text-slate-500 flex items-center justify-between shrink-0">
-          <span className="font-semibold truncate">{currentUser?.name || 'User'}</span>
-          <span className="bg-indigo-100 text-indigo-700 font-extrabold px-2 py-0.5 rounded-md text-[10px] uppercase">{userRole}</span>
+                  <Trash2 className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            );
+          })}
         </div>
       </aside>
 
+      {/* DESKTOP CHAT HISTORY SIDEBAR - EXPANDED */}
+      {isChatHistoryOpen && (
+        <aside className="w-80 bg-slate-50/80 border-r border-slate-200/80 hidden md:flex flex-col shrink-0 transition-all duration-300">
+          <div className="p-4 border-b border-slate-200/60 flex flex-col gap-3 shrink-0">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-extrabold text-slate-500 uppercase tracking-wider flex items-center gap-2">
+                <Bot className="w-4 h-4 text-indigo-600" /> Chat History
+              </span>
+              <button
+                onClick={() => setIsChatHistoryOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all"
+                title="Close Chat History"
+              >
+                <PanelLeftClose className="w-4 h-4" />
+              </button>
+            </div>
+
+            <button
+              onClick={createNewChat}
+              className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white font-bold py-2.5 px-4 rounded-2xl shadow-sm shadow-indigo-100 transition-all active:scale-[0.98] text-xs"
+            >
+              <Plus className="w-4 h-4" />
+              <span>New Chat</span>
+            </button>
+
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search chats..."
+                className="w-full bg-white border border-slate-200 rounded-xl pl-8 pr-3 py-1.5 text-xs text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500"
+              />
+            </div>
+          </div>
+
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
+            {filteredConversations.length === 0 ? (
+              <div className="text-center py-10 text-slate-400">
+                <Bot className="w-8 h-8 mx-auto mb-2 opacity-50" />
+                <p className="text-xs font-medium">No chats found.</p>
+              </div>
+            ) : (
+              filteredConversations.map(conv => {
+                const isActive = conv.id === activeConvId;
+                return (
+                  <div
+                    key={conv.id}
+                    onClick={() => setActiveConvId(conv.id)}
+                    className={`group relative flex items-center justify-between p-3 rounded-xl cursor-pointer transition-all ${
+                      isActive
+                        ? 'bg-indigo-50 border border-indigo-200/80 shadow-xs text-indigo-900 font-semibold'
+                        : 'hover:bg-white text-slate-700 border border-transparent hover:border-slate-200/60 font-medium'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2.5 truncate pr-6">
+                      <Bot className={`w-4 h-4 shrink-0 ${isActive ? 'text-indigo-600' : 'text-slate-400'}`} />
+                      <span className="text-xs truncate">{conv.title}</span>
+                    </div>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteModalConv(conv);
+                      }}
+                      className="opacity-0 group-hover:opacity-100 p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-all absolute right-2"
+                      title="Delete Chat"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <div className="p-3 border-t border-slate-200/60 bg-white/50 text-xs text-slate-500 flex items-center justify-between shrink-0">
+            <span className="font-semibold truncate">{currentUser?.name || 'User'}</span>
+            <span className="bg-indigo-100 text-indigo-700 font-extrabold px-2 py-0.5 rounded-md text-[10px] uppercase">{userRole}</span>
+          </div>
+        </aside>
+      )}
+
       {/* MAIN CHAT AREA */}
-      <main className="flex-1 flex flex-col bg-white overflow-hidden relative">
+      <main className="flex-1 flex flex-col bg-white overflow-hidden relative h-full">
 
         {/* Chat Header */}
-        <header className="p-4 border-b border-slate-100 flex items-center justify-between bg-white shrink-0 z-10">
+        <header className="p-3.5 md:p-4 border-b border-slate-100 flex items-center justify-between bg-white shrink-0 z-10">
           <div className="flex items-center gap-3">
-            <div className="p-2 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl text-white shadow-sm">
-              <Bot className="w-5 h-5" />
+            {/* Mobile menu button */}
+            <button
+              onClick={() => setIsMobileSidebarOpen(true)}
+              className="p-1.5 text-slate-500 hover:bg-slate-100 rounded-xl md:hidden"
+              title="Open History"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+
+            {/* Desktop uncollapse icon button when chat history is closed */}
+            {!isChatHistoryOpen && (
+              <button
+                onClick={() => setIsChatHistoryOpen(true)}
+                className="p-1.5 text-slate-500 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl transition-all hidden md:flex items-center"
+                title="Open Chat History"
+              >
+                <PanelLeftOpen className="w-5 h-5" />
+              </button>
+            )}
+
+            <div className="p-2 bg-gradient-to-br from-indigo-500 to-violet-600 rounded-xl text-white shadow-xs shrink-0">
+              <Bot className="w-4 h-4 md:w-5 md:h-5" />
             </div>
-            <div>
-              <h2 className="font-bold text-slate-800 text-base leading-tight">
+            <div className="min-w-0">
+              <h2 className="font-bold text-slate-800 text-sm md:text-base leading-tight truncate max-w-[200px] sm:max-w-md">
                 {conversations.find(c => c.id === activeConvId)?.title || 'Academix AI Assistant'}
               </h2>
-              <p className="text-xs text-slate-400 font-medium flex items-center gap-1.5 mt-0.5">
+              <p className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5 mt-0.5">
                 <span>Model:</span>
                 <span className="font-bold text-slate-600 capitalize">{selectedProvider}</span>
               </p>
             </div>
           </div>
 
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5">
-              <span className={`w-2.5 h-2.5 rounded-full ${providersStatus[selectedProvider]?.status === 'available' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
+          <div className="flex items-center gap-2 md:gap-3">
+            <div className="flex items-center gap-1.5 md:gap-2 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5">
+              <span className={`w-2 h-2 rounded-full ${providersStatus[selectedProvider]?.status === 'available' ? 'bg-emerald-500 animate-pulse' : 'bg-rose-500'}`} />
               <select
                 value={selectedProvider}
                 onChange={(e) => setSelectedProvider(e.target.value)}
-                className="bg-transparent text-xs font-bold text-slate-700 outline-none cursor-pointer"
+                className="bg-transparent text-[11px] md:text-xs font-bold text-slate-700 outline-none cursor-pointer"
               >
                 <option value="local">Ollama (Local)</option>
                 <option value="gemini">Gemini</option>
-                <option value="openrouter">
-                  OpenRouter {providersStatus.openrouter?.model ? `(${providersStatus.openrouter.model.split('/').pop()})` : ''}
-                </option>
+                <option value="openrouter">OpenRouter</option>
                 <option value="deepseek">DeepSeek</option>
               </select>
             </div>

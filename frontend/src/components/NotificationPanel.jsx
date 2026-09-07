@@ -86,48 +86,143 @@ export default function NotificationPanel() {
         </div>
       )}
 
-      <div className="flex-1 overflow-y-auto p-2 custom-scrollbar">
+      <div className="flex-1 overflow-y-auto p-3 custom-scrollbar space-y-4">
         {loading ? (
           <p className="text-slate-500 text-sm p-4 text-center">Loading...</p>
-        ) : activeTab === 'inbox' && notifications.length === 0 ? (
-          <p className="text-slate-500 text-sm p-4 text-center">No notifications yet.</p>
-        ) : activeTab === 'sent' && sentNotifications.length === 0 ? (
-          <p className="text-slate-500 text-sm p-4 text-center">No sent notifications.</p>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {(activeTab === 'inbox' ? notifications : sentNotifications).map((notif) => (
-              <div 
-                key={notif.id} 
-                onClick={() => handleNotificationClick(notif)}
-                className={`p-4 transition-colors cursor-pointer hover:bg-slate-50 ${activeTab === 'inbox' && !notif.is_read ? 'bg-indigo-50/50' : ''}`}
-              >
-                <div className="flex justify-between items-start mb-1">
-                  <h4 className={`text-sm ${activeTab === 'inbox' && !notif.is_read ? 'font-bold text-slate-900' : 'font-semibold text-slate-700'}`}>
-                    {activeTab === 'inbox' && !notif.is_read && <span className="inline-block w-2 h-2 rounded-full bg-indigo-500 mr-2" />}
-                    {notif.title}
-                  </h4>
-                  <span className="text-xs text-slate-400 shrink-0 ml-2">
-                    {new Date(notif.created_at).toLocaleDateString()}
+        ) : activeTab === 'inbox' ? (
+          notifications.length === 0 ? (
+            <div className="py-8 text-center text-slate-400">
+              <Bell className="w-8 h-8 mx-auto mb-2 opacity-30 text-slate-400" />
+              <p className="text-sm font-medium">No notifications yet.</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {/* UNREAD SECTION */}
+              <div>
+                <div className="flex items-center justify-between px-2 pb-2 mb-1 border-b border-indigo-100/60">
+                  <span className="text-xs font-extrabold uppercase tracking-wider text-indigo-700 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-indigo-600 animate-pulse" />
+                    Unread ({notifications.filter(n => !n.is_read).length})
                   </span>
                 </div>
-                <p className="text-sm text-slate-600 mb-2 line-clamp-2">{notif.message}</p>
-                {notif.image_url && (
-                   <div className="mb-2 flex items-center gap-1.5 text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-md w-fit">
-                     <ImageIcon className="w-3.5 h-3.5" /> Image Attached
-                   </div>
+                {notifications.filter(n => !n.is_read).length === 0 ? (
+                  <div className="p-3 bg-slate-50/70 border border-slate-100 rounded-xl text-center">
+                    <p className="text-xs font-semibold text-slate-400">No unread notifications</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {notifications.filter(n => !n.is_read).map((notif) => (
+                      <div 
+                        key={notif.id} 
+                        onClick={() => handleNotificationClick(notif)}
+                        className="p-3.5 bg-indigo-50/70 hover:bg-indigo-50 border border-indigo-100/80 rounded-2xl transition-all cursor-pointer shadow-sm hover:shadow-md group"
+                      >
+                        <div className="flex justify-between items-start mb-1">
+                          <h4 className="text-sm font-bold text-slate-900 group-hover:text-indigo-900 flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-indigo-600 shrink-0" />
+                            <span className="truncate">{notif.title}</span>
+                          </h4>
+                          <span className="text-[11px] font-semibold text-indigo-600/80 shrink-0 ml-2 bg-indigo-100/60 px-2 py-0.5 rounded-full">
+                            {new Date(notif.created_at).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-600 mb-2 line-clamp-2 pl-4">{notif.message}</p>
+                        {notif.image_url && (
+                          <div className="ml-4 mb-2 flex items-center gap-1.5 text-xs font-bold text-indigo-600 bg-white/80 border border-indigo-100 px-2 py-1 rounded-md w-fit shadow-xs">
+                            <ImageIcon className="w-3.5 h-3.5 text-indigo-600" /> Image Attached
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center pl-4 mt-1">
+                          <span className="text-[11px] font-semibold text-slate-500 bg-white/80 border border-slate-200/60 px-2 py-0.5 rounded-md">
+                            From: {notif.sender_name || 'Academic Office'} ({notif.sender_role ? notif.sender_role.replace('_', ' ') : 'System'})
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 )}
-                <div className="flex justify-between items-center mt-1">
-                  <span className="text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
-                    {activeTab === 'inbox' ? (
-                      `From: ${notif.sender_name} (${notif.sender_role.replace('_', ' ')})`
-                    ) : (
-                      `Target: ${notif.target_name ? notif.target_name : notif.recipient_type.replace(/_/g, ' ')}`
-                    )}
+              </div>
+
+              {/* READ SECTION */}
+              <div>
+                <div className="flex items-center justify-between px-2 pb-2 mb-1 border-b border-slate-100">
+                  <span className="text-xs font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                    Read ({notifications.filter(n => n.is_read).length})
                   </span>
                 </div>
+                {notifications.filter(n => n.is_read).length === 0 ? (
+                  <div className="p-3 bg-slate-50/70 border border-slate-100 rounded-xl text-center">
+                    <p className="text-xs font-semibold text-slate-400">No read notifications</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {notifications.filter(n => n.is_read).map((notif) => (
+                      <div 
+                        key={notif.id} 
+                        onClick={() => handleNotificationClick(notif)}
+                        className="p-3 bg-white hover:bg-slate-50 border border-slate-100 rounded-2xl transition-all cursor-pointer opacity-90 hover:opacity-100"
+                      >
+                        <div className="flex justify-between items-start mb-1">
+                          <h4 className="text-sm font-semibold text-slate-700 truncate">
+                            {notif.title}
+                          </h4>
+                          <span className="text-[11px] text-slate-400 shrink-0 ml-2">
+                            {new Date(notif.created_at).toLocaleDateString()}
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 mb-2 line-clamp-2">{notif.message}</p>
+                        {notif.image_url && (
+                          <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md w-fit">
+                            <ImageIcon className="w-3.5 h-3.5" /> Image Attached
+                          </div>
+                        )}
+                        <div className="flex justify-between items-center mt-1">
+                          <span className="text-[11px] font-medium text-slate-400 bg-slate-50 px-2 py-0.5 rounded">
+                            From: {notif.sender_name || 'Academic Office'} ({notif.sender_role ? notif.sender_role.replace('_', ' ') : 'System'})
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-            ))}
-          </div>
+            </div>
+          )
+        ) : (
+          /* SENT TAB (for staff) */
+          sentNotifications.length === 0 ? (
+            <p className="text-slate-500 text-sm p-4 text-center">No sent notifications.</p>
+          ) : (
+            <div className="space-y-2">
+              {sentNotifications.map((notif) => (
+                <div 
+                  key={notif.id} 
+                  onClick={() => handleNotificationClick(notif)}
+                  className="p-3.5 bg-white hover:bg-slate-50 border border-slate-100 rounded-2xl transition-all cursor-pointer"
+                >
+                  <div className="flex justify-between items-start mb-1">
+                    <h4 className="text-sm font-semibold text-slate-700 truncate">
+                      {notif.title}
+                    </h4>
+                    <span className="text-[11px] text-slate-400 shrink-0 ml-2">
+                      {new Date(notif.created_at).toLocaleDateString()}
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 mb-2 line-clamp-2">{notif.message}</p>
+                  {notif.image_url && (
+                    <div className="mb-2 flex items-center gap-1.5 text-xs font-medium text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded-md w-fit">
+                      <ImageIcon className="w-3.5 h-3.5" /> Image Attached
+                    </div>
+                  )}
+                  <div className="flex justify-between items-center mt-1">
+                    <span className="text-[11px] font-medium text-slate-500 bg-slate-100 px-2 py-0.5 rounded">
+                      Target: {notif.target_name ? notif.target_name : notif.recipient_type.replace(/_/g, ' ')}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
         )}
       </div>
 

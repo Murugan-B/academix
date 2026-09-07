@@ -265,6 +265,116 @@ Provide helpful, accurate responses formatted in Markdown.`;
     const raw = await this._chat(messages);
     return raw.trim();
   }
+
+  async generateLearningContent(topic, materialText, wrongQuestions = [], meta = {}) {
+    console.log('[AI][OpenRouter] task=learning_content');
+    let wrongQuestionsBlock = '';
+    if (wrongQuestions && wrongQuestions.length > 0) {
+      wrongQuestionsBlock = `\nSTUDENT'S PREVIOUS INCORRECT QUESTIONS IN THIS TOPIC:\n` +
+        wrongQuestions.map((q, idx) => `Question ${idx + 1}: ${q.question}\nSelected (Wrong): ${q.selected_answer || 'N/A'}\nCorrect: ${q.correct_answer || 'N/A'}\nExplanation: ${q.explanation || ''}`).join('\n\n');
+    }
+
+    const messages = [
+      {
+        role: 'system',
+        content: `You are Academix AI, an expert academic tutor. Generate grounded personalized learning content in strict JSON format only. Never output markdown code fences or conversational text.`
+      },
+      {
+        role: 'user',
+        content: `A student needs personalized academic learning on the topic: "${topic}".
+
+Ground all content in the provided source material.
+Address any specific gaps shown in their previous incorrect questions.
+
+SOURCE ACADEMIC MATERIAL:
+${materialText}
+${wrongQuestionsBlock}
+
+Return ONLY valid JSON matching this schema:
+{
+  "topic": "${topic}",
+  "difficulty": "Easy" or "Medium" or "Hard",
+  "whyWeak": "1-2 sentence explanation of the student's missed concept",
+  "simpleExplanation": "Clear conceptual explanation in 2-3 paragraphs",
+  "whyItMatters": "Significance of this topic",
+  "importantConcepts": [
+    { "concept": "Concept Name", "description": "Crisp description" }
+  ],
+  "importantPoints": [
+    "Exam key point 1",
+    "Exam key point 2"
+  ],
+  "importantSubtopics": [
+    { "title": "Subtopic Title", "keyPoint": "Takeaway" }
+  ],
+  "materialBasedLearning": {
+    "sourceType": "${meta.fileType || 'Material'}",
+    "slidesOrSections": [
+      {
+        "title": "Section Title",
+        "reference": "Slide/Section Reference",
+        "keyTakeaway": "Key takeaway"
+      }
+    ]
+  },
+  "examples": [
+    {
+      "title": "Example",
+      "problem": "Problem",
+      "solution": "Solution",
+      "explanation": "Why correct"
+    }
+  ],
+  "stepByStep": [
+    { "step": 1, "title": "Step 1", "description": "Details" }
+  ],
+  "commonMistakes": [
+    {
+      "mistake": "Mistake",
+      "whyWrong": "Why wrong",
+      "howToFix": "How to fix"
+    }
+  ],
+  "quickRevision": [
+    "Point 1",
+    "Point 2"
+  ],
+  "practiceQuestions": [
+    {
+      "id": 1,
+      "question": "Practice question?",
+      "options": ["A", "B", "C", "D"],
+      "correctAnswerIndex": 0,
+      "explanation": "Explanation"
+    },
+    {
+      "id": 2,
+      "question": "Practice question 2?",
+      "options": ["A", "B", "C", "D"],
+      "correctAnswerIndex": 1,
+      "explanation": "Explanation"
+    },
+    {
+      "id": 3,
+      "question": "Practice question 3?",
+      "options": ["A", "B", "C", "D"],
+      "correctAnswerIndex": 2,
+      "explanation": "Explanation"
+    }
+  ]
+}`
+      }
+    ];
+
+    try {
+      const raw = await this._chat(messages, true);
+      const cleaned = this._cleanJson(raw);
+      return JSON.parse(cleaned);
+    } catch (err) {
+      console.error('[AI][OpenRouter] generateLearningContent parse error:', err.message);
+      throw new Error(`OpenRouter failed to generate learning content: ${err.message}`);
+    }
+  }
 }
 
 module.exports = OpenRouterProvider;

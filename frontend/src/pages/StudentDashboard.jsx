@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { User, BookOpen, Clock, Activity, ChevronRight, BrainCircuit } from 'lucide-react';
+import { User, BookOpen, Clock, Activity, ChevronRight, BrainCircuit, Sparkles } from 'lucide-react';
 import api from '../api/axios';
 import NotificationPanel from '../components/NotificationPanel';
 
@@ -166,6 +166,13 @@ export default function StudentDashboard() {
           <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white flex flex-col h-[420px]">
             <h3 className="font-bold text-slate-500 mb-2 flex items-center justify-between shrink-0">
               <span className="flex items-center gap-2"><BookOpen className="w-4 h-4" /> Topics to Focus On</span>
+              <button 
+                onClick={() => navigate('/ai-learning')}
+                className="text-xs font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 px-3 py-1.5 rounded-lg transition-colors flex items-center gap-1.5"
+                title="Open Personalized AI Learning"
+              >
+                <Sparkles className="w-3.5 h-3.5" /> Start Learning
+              </button>
             </h3>
             {selectedAttempt && (
               <p className="text-xs text-slate-400 font-medium mb-4 pb-4 border-b border-slate-100 shrink-0">
@@ -210,8 +217,16 @@ export default function StudentDashboard() {
                   {topicAnalysis.needToFocus.length > 0 ? (
                     <div className="flex flex-col gap-2">
                       {topicAnalysis.needToFocus.map((t, i) => (
-                        <div key={i} className="flex justify-between items-center bg-rose-50/50 p-2.5 rounded-xl border border-rose-100/50">
-                          <span className="font-semibold text-sm text-slate-700">{t.topic}</span>
+                        <div 
+                          key={i} 
+                          onClick={() => navigate('/ai-learning', { state: { topicTag: t.topic } })}
+                          className="flex justify-between items-center bg-rose-50/50 hover:bg-rose-100/70 p-2.5 rounded-xl border border-rose-100/50 cursor-pointer transition-all group"
+                          title="Click to start personalized learning on this topic"
+                        >
+                          <span className="font-semibold text-sm text-slate-700 group-hover:text-rose-900 flex items-center gap-1.5">
+                            <Sparkles className="w-3.5 h-3.5 text-rose-400 group-hover:text-rose-600" />
+                            {t.topic}
+                          </span>
                           <span className="text-sm font-bold text-rose-600">{t.percentage}%</span>
                         </div>
                       ))}

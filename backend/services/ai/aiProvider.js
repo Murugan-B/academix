@@ -37,8 +37,16 @@ class AIProvider {
    * @param {object} stats - The student's quiz performance stats.
    * @returns {Promise<string>} The recommendation text.
    */
-  async generateRecommendation(stats) {
-    throw new Error('Method generateRecommendation() must be implemented by subclass.');
+  /**
+   * Generates structured personalized learning content for a weak topic grounded in academic material.
+   * @param {string} topic - The topic name.
+   * @param {string} materialText - Grounding text from academic material.
+   * @param {Array} wrongQuestions - Array of questions the student got wrong.
+   * @param {object} meta - Additional metadata (e.g. file_type, title).
+   * @returns {Promise<object>} Structured learning object.
+   */
+  async generateLearningContent(topic, materialText, wrongQuestions = [], meta = {}) {
+    throw new Error('Method generateLearningContent() must be implemented by subclass.');
   }
 }
 

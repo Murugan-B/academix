@@ -205,6 +205,120 @@ Be direct, specific, and encouraging. Do not use generic phrases like "keep it u
       throw new Error(`Gemini API error: ${error.message}`);
     }
   }
+
+  async generateLearningContent(topic, materialText, wrongQuestions = [], meta = {}) {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error('Gemini API key is not configured in backend environment.');
+    }
+
+    let wrongQuestionsBlock = '';
+    if (wrongQuestions && wrongQuestions.length > 0) {
+      wrongQuestionsBlock = `\nSTUDENT'S PREVIOUS INCORRECT QUESTIONS IN THIS TOPIC:\n` +
+        wrongQuestions.map((q, idx) => `Question ${idx + 1}: ${q.question}\nSelected (Wrong): ${q.selected_answer || 'N/A'}\nCorrect: ${q.correct_answer || 'N/A'}\nExplanation: ${q.explanation || ''}`).join('\n\n');
+    }
+
+    const prompt = `You are Academix AI, an expert personalized learning tutor.
+A student needs to improve on the topic: "${topic}".
+
+Generate comprehensive, grounded, student-friendly learning material using ONLY the provided academic source material. Address any specific gaps shown in the student's previous incorrect questions.
+
+SOURCE ACADEMIC MATERIAL:
+${materialText}
+${wrongQuestionsBlock}
+
+CRITICAL RULES:
+1. Ground all explanations, concepts, and examples in the provided source material.
+2. Do not invent page numbers or slide references not supported by the text.
+3. Return ONLY a valid JSON object without markdown fences or extraneous text.
+
+STRICT JSON STRUCTURE REQUIRED:
+{
+  "topic": "${topic}",
+  "difficulty": "Easy" or "Medium" or "Hard",
+  "whyWeak": "Clear 1-2 sentence explanation of why the student struggled or what key concept was missed",
+  "simpleExplanation": "Clear, very easy to understand conceptual explanation in 2-3 paragraphs",
+  "whyItMatters": "Academic and real-world significance of this topic",
+  "importantConcepts": [
+    { "concept": "Concept Name", "description": "Crisp explanation" }
+  ],
+  "importantPoints": [
+    "Exam-focused key point 1",
+    "Exam-focused key point 2"
+  ],
+  "importantSubtopics": [
+    { "title": "Subtopic Title", "keyPoint": "Essential takeaway" }
+  ],
+  "materialBasedLearning": {
+    "sourceType": "${meta.fileType || 'Material'}",
+    "slidesOrSections": [
+      {
+        "title": "Section or Concept Title",
+        "reference": "Slide/Section Reference if known",
+        "keyTakeaway": "Key takeaway from this section"
+      }
+    ]
+  },
+  "examples": [
+    {
+      "title": "Example Title",
+      "problem": "Problem statement or scenario",
+      "solution": "Clear solution",
+      "explanation": "Why this solution is correct"
+    }
+  ],
+  "stepByStep": [
+    { "step": 1, "title": "Step 1 Title", "description": "Step 1 details" }
+  ],
+  "commonMistakes": [
+    {
+      "mistake": "Common conceptual mistake or pitfall",
+      "whyWrong": "Why students make this mistake",
+      "howToFix": "How to remember or solve it correctly"
+    }
+  ],
+  "quickRevision": [
+    "Quick bullet 1",
+    "Quick bullet 2"
+  ],
+  "practiceQuestions": [
+    {
+      "id": 1,
+      "question": "Multiple-choice practice question targeting weak points?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctAnswerIndex": 0,
+      "explanation": "Detailed explanation of correct answer"
+    },
+    {
+      "id": 2,
+      "question": "Second practice question?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctAnswerIndex": 1,
+      "explanation": "Detailed explanation"
+    },
+    {
+      "id": 3,
+      "question": "Third practice question?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
+      "correctAnswerIndex": 2,
+      "explanation": "Detailed explanation"
+    }
+  ]
+}`;
+
+    try {
+      const response = await this.ai.models.generateContent({
+        model: this.modelName,
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+      const raw = response.text.trim();
+      const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
+      return JSON.parse(cleaned);
+    } catch (error) {
+      console.error('Gemini generateLearningContent error:', error);
+      throw new Error(`Failed to generate personalized learning content: ${error.message}`);
+    }
+  }
 }
 
 module.exports = GeminiProvider;

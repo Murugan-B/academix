@@ -125,6 +125,15 @@ class AIService {
     return provider.generateRecommendation(stats);
   }
 
+  async generateLearningContent(providerName, topic, materialText, wrongQuestions = [], meta = {}) {
+    const provider = this.getProvider(providerName);
+    let contextText = materialText;
+    if (materialText && materialText.length > CHUNK_SIZE * 2) {
+      contextText = materialText.slice(0, CHUNK_SIZE * 2) + "\n\n[Note: Document truncated for prompt size.]";
+    }
+    return provider.generateLearningContent(topic, contextText, wrongQuestions, meta);
+  }
+
   async generateEmbeddingsForMaterial(materialId, text, providerName = 'local') {
     const provider = this.getProvider(providerName);
     const chunkingService = require('./chunkingService');
