@@ -143,7 +143,7 @@ export default function StudentDashboard() {
       
       {analytics && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8 animate-in fade-in slide-in-from-bottom-4 duration-700 ease-out delay-100">
-          <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white flex flex-col items-center text-center">
+          <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white flex flex-col items-center justify-center text-center h-[420px]">
             <h3 className="font-bold text-slate-500 mb-2">Quiz Performance</h3>
             <p className="text-4xl font-extrabold text-indigo-600 mb-4">{analytics.averageScore}%</p>
             <div className="flex gap-4 text-sm font-semibold">
@@ -163,12 +163,12 @@ export default function StudentDashboard() {
             </div>
           </div>
           
-          <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white flex flex-col">
-            <h3 className="font-bold text-slate-500 mb-2 flex items-center justify-between">
+          <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white flex flex-col h-[420px]">
+            <h3 className="font-bold text-slate-500 mb-2 flex items-center justify-between shrink-0">
               <span className="flex items-center gap-2"><BookOpen className="w-4 h-4" /> Topics to Focus On</span>
             </h3>
             {selectedAttempt && (
-              <p className="text-xs text-slate-400 font-medium mb-4 pb-4 border-b border-slate-100">
+              <p className="text-xs text-slate-400 font-medium mb-4 pb-4 border-b border-slate-100 shrink-0">
                 Analyzing: {selectedAttempt.material_title || selectedAttempt.quiz_title} — Attempt {selectedAttempt.attempt_number} — {parseFloat(selectedAttempt.percentage).toFixed(1)}%
               </p>
             )}
@@ -182,7 +182,7 @@ export default function StudentDashboard() {
                  <p className="font-medium">Topic-wise analysis is not available for this attempt.</p>
                </div>
             ) : (
-              <div className="flex flex-col gap-6 flex-1 overflow-y-auto custom-scrollbar pr-1">
+              <div className="flex flex-col gap-6 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
                 {/* Good At Section */}
                 <div>
                   <h4 className="text-xs font-bold text-emerald-500 mb-3 flex items-center gap-1.5 uppercase tracking-wider">
@@ -234,8 +234,8 @@ export default function StudentDashboard() {
             )}
           </div>
           
-          <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white flex flex-col">
-            <div className="flex items-center justify-between mb-4">
+          <div className="bg-white/80 backdrop-blur-xl p-8 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white flex flex-col h-[420px]">
+            <div className="flex items-center justify-between mb-4 shrink-0">
               <h3 className="font-bold text-slate-500 flex items-center gap-2"><Clock className="w-4 h-4" /> Recent Attempts</h3>
               {selectedAttempt && (
                 <button 
@@ -247,7 +247,7 @@ export default function StudentDashboard() {
               )}
             </div>
             {analytics.recentAttempts?.length > 0 ? (
-               <div className="flex flex-col gap-3 flex-1 overflow-y-auto custom-scrollbar pr-1">
+               <div className="flex flex-col gap-3 flex-1 min-h-0 overflow-y-auto custom-scrollbar pr-1">
                  {analytics.recentAttempts.map(att => {
                    const isSelected = selectedAttempt?.id === att.id;
                    return (

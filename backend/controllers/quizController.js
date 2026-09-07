@@ -129,7 +129,17 @@ exports.startAttempt = async (req, res) => {
         
         // Insert new questions into the pool
         const newlyInserted = [];
+        const normalize = str => (str || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+        const existingNormalized = new Set(allQuestions.map(q => normalize(q.question)));
+
         for (const q of newQuestionsData) {
+          const normQ = normalize(q.question);
+          if (existingNormalized.has(normQ)) {
+            console.log(`[QUIZ] Rejected duplicate question: ${q.question}`);
+            continue;
+          }
+          existingNormalized.add(normQ);
+
           const insertRes = await client.query(
             `INSERT INTO quiz_questions 
              (quiz_id, question, option_a, option_b, option_c, option_d, correct_answer, explanation, topic_tag) 

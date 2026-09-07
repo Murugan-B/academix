@@ -7,5 +7,6 @@ router.post('/summarize', authMiddleware, aiController.generateSummary);
 router.get('/summaries/:materialId', authMiddleware, aiController.getSummaries);
 router.post('/chat', authMiddleware, aiController.askQuestion);
 router.get('/chat/:materialId', authMiddleware, aiController.getChatHistory);
+router.get('/health', authMiddleware, aiController.getHealth);
 
 module.exports = router;

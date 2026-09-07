@@ -155,11 +155,15 @@ const extractTextFromMaterial = async (material) => {
       const data = await parser.getText();
       extractedText = data.text;
     } else if (ext === 'docx' || mime.includes('wordprocessingml')) {
-      const result = await officeParser.parseOffice(buffer, { fileType: 'docx' });
-      extractedText = typeof result === 'string' ? result : (result?.toString() || '');
+      extractedText = await withTempFile(buffer, 'docx', async (tempPath) => {
+        const result = await officeParser.parseOffice(tempPath);
+        return typeof result === 'string' ? result : (result?.toString() || '');
+      });
     } else if (ext === 'pptx' || mime.includes('presentationml')) {
-      const result = await officeParser.parseOffice(buffer, { fileType: 'pptx' });
-      extractedText = typeof result === 'string' ? result : (result?.toString() || '');
+      extractedText = await withTempFile(buffer, 'pptx', async (tempPath) => {
+        const result = await officeParser.parseOffice(tempPath);
+        return typeof result === 'string' ? result : (result?.toString() || '');
+      });
     } else if (ext === 'doc' || mime.includes('msword')) {
       const WordExtractor = require('word-extractor');
       const extractor = new WordExtractor();

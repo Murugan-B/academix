@@ -10,7 +10,7 @@ import api from '../api/axios';
 pdfMake.vfs = pdfFonts.default?.pdfMake?.vfs || pdfFonts.pdfMake?.vfs || pdfFonts.default || pdfFonts;
 
 export default function AISummaryPanel({ material, subject, onClose }) {
-  const [provider, setProvider] = useState('Gemini');
+  const [provider, setProvider] = useState('Local');
   const [summary, setSummary] = useState(null);
   const [history, setHistory] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -222,6 +222,7 @@ export default function AISummaryPanel({ material, subject, onClose }) {
                 onChange={(e) => setProvider(e.target.value)}
                 className="bg-slate-50 border border-slate-200 text-sm font-bold text-slate-700 rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-indigo-500"
               >
+                <option value="Local">Local (Ollama)</option>
                 <option value="Gemini">Gemini</option>
                 <option value="DeepSeek">DeepSeek</option>
               </select>

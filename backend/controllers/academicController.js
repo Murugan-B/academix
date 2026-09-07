@@ -259,7 +259,27 @@ exports.uploadMaterial = async (req, res) => {
             req.user.id
           ]
         );
-        return res.status(201).json(dbResult.rows[0]);
+        
+        const savedMaterial = dbResult.rows[0];
+        res.status(201).json(savedMaterial);
+
+        // Run extraction & embedding in the background if using Local AI
+        if (process.env.AI_PROVIDER === 'local') {
+          const { extractTextFromMaterial } = require('../utils/textExtractor');
+          const aiService = require('../services/ai/aiService');
+          
+          extractTextFromMaterial(savedMaterial)
+            .then(({ text }) => {
+              console.log(`[BACKGROUND] Generating RAG embeddings for material ${savedMaterial.id}`);
+              return aiService.generateEmbeddingsForMaterial(savedMaterial.id, text, 'local');
+            })
+            .then(() => {
+              console.log(`[BACKGROUND] RAG embeddings completed for material ${savedMaterial.id}`);
+            })
+            .catch(err => {
+              console.error(`[BACKGROUND] Auto-extraction/embedding failed:`, err.message);
+            });
+        }
       }
     );
     uploadStream.end(req.file.buffer);

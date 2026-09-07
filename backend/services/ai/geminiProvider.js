@@ -160,6 +160,52 @@ Be direct, specific, and encouraging. Do not use generic phrases like "keep it u
       throw new Error('Failed to generate recommendation.');
     }
   }
+
+  async generateChatResponse(history, question, contextText = '', imageBuffer = null, mimeType = 'image/png') {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error('Gemini API key is not configured in backend environment.');
+    }
+
+    let systemInstruction = `You are Academix AI Assistant, an expert academic tutor and study partner. Provide helpful, accurate, structured Markdown responses.`;
+    
+    let contextBlock = '';
+    if (contextText) {
+      contextBlock += `\n\n=== UPLOADED DOCUMENT CONTEXT ===\n${contextText}\n\nSTRICT INSTRUCTION FOR DOCUMENT CONTEXT: Prioritize the uploaded document material to answer the question. If the requested information is not in the material, state clearly: "I couldn't find this information in the uploaded material." Do not invent or hallucinate missing details.\n`;
+    }
+
+    let historyBlock = '';
+    if (history && history.length > 0) {
+      const recentHistory = history.slice(-6);
+      historyBlock = recentHistory.map(m => `${m.sender.toUpperCase()}: ${m.content}`).join('\n');
+    }
+
+    let fullPrompt = `${systemInstruction}${contextBlock}\n\n=== CONVERSATION HISTORY ===\n${historyBlock}\n\nUSER: ${question}\nASSISTANT:`;
+
+    try {
+      let contentsPayload = fullPrompt;
+      if (imageBuffer) {
+        contentsPayload = [
+          {
+            inlineData: {
+              data: imageBuffer.toString('base64'),
+              mimeType: mimeType || 'image/png'
+            }
+          },
+          fullPrompt
+        ];
+      }
+
+      const response = await this.ai.models.generateContent({
+        model: this.modelName,
+        contents: contentsPayload,
+      });
+      return response.text.trim();
+    } catch (error) {
+      console.error('Gemini generateChatResponse error:', error);
+      throw new Error(`Gemini API error: ${error.message}`);
+    }
+  }
 }
 
 module.exports = GeminiProvider;
+

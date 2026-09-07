@@ -1,5 +1,5 @@
 import { Outlet, useNavigate, Link, useLocation } from 'react-router-dom';
-import { LogOut, BookOpen, Users, Settings, LayoutDashboard, BookText } from 'lucide-react';
+import { LogOut, BookOpen, Users, Settings, LayoutDashboard, BookText, Bot } from 'lucide-react';
 
 export default function Layout() {
   const navigate = useNavigate();
@@ -49,6 +49,14 @@ export default function Layout() {
             <LayoutDashboard className={`w-5 h-5 transition-transform duration-300 ${currentPath === getDashboardRoute() ? 'text-indigo-600 scale-110' : 'text-slate-400 group-hover:text-indigo-500 group-hover:scale-110'}`} />
             Dashboard
           </Link>
+
+          <Link 
+            to="/ai-assistant" 
+            className={`flex items-center gap-3 px-4 py-3.5 rounded-xl transition-all group border ${currentPath === '/ai-assistant' ? 'text-indigo-700 bg-indigo-50/80 font-semibold shadow-sm border-indigo-100/50 hover:shadow-md hover:bg-indigo-50' : 'text-slate-600 hover:text-indigo-700 hover:bg-white/80 font-medium hover:shadow-sm border-transparent hover:border-slate-100'}`}
+          >
+            <Bot className={`w-5 h-5 transition-transform duration-300 ${currentPath === '/ai-assistant' ? 'text-indigo-600 scale-110' : 'text-slate-400 group-hover:text-indigo-500 group-hover:scale-110'}`} />
+            AI Assistant
+          </Link>
           
           {role !== 'STUDENT' && (
             <Link 
@@ -78,6 +86,7 @@ export default function Layout() {
             Settings
           </Link>
         </nav>
+
 
         <div className="p-6 border-t border-indigo-50/50 bg-white/30">
           <button 

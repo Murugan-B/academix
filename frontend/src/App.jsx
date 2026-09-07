@@ -12,6 +12,7 @@ import StudentDashboard from './pages/StudentDashboard';
 import StudentDetails from './pages/StudentDetails';
 import QuizPage from './pages/QuizPage';
 import AttemptReviewPage from './pages/AttemptReviewPage';
+import AIAssistant from './pages/AIAssistant';
 import Layout from './components/layout/Layout';
 import ToastContainer from './components/Toast';
 
@@ -34,6 +35,7 @@ function App() {
         <Route path="subjects" element={<Subjects />} />
         <Route path="subjects/:subjectId" element={<SubjectDetails />} />
         <Route path="attempt-review/:attemptId" element={<AttemptReviewPage />} />
+        <Route path="ai-assistant" element={<AIAssistant />} />
         <Route index element={<Navigate to="/login" replace />} />
       </Route>
       

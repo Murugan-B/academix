@@ -1,5 +1,6 @@
 const GeminiProvider = require('./geminiProvider');
 const DeepSeekProvider = require('./deepseekProvider');
+const LocalProvider = require('./localProvider');
 
 const CHUNK_SIZE = 25000; // Character limit per chunk (approx 5000 tokens)
 
@@ -18,7 +19,7 @@ class AIService {
     this.providers = {
       gemini: new GeminiProvider(),
       deepseek: new DeepSeekProvider(),
-      // academix: new AcademixAIProvider() // Future integration
+      local: new LocalProvider()
     };
   }
 
@@ -50,12 +51,42 @@ class AIService {
     return provider.summarizeContent(`This is a combination of summaries from sections of a large document. Please synthesize them into one cohesive, well-structured final summary:\\n\\n${combinedText}`);
   }
 
-  async askQuestion(providerName, text, question) {
+  async askQuestion(providerName, text, question, materialId = null) {
     const provider = this.getProvider(providerName);
     
-    // For Q&A, sending the whole document might exceed context, but models like Gemini support 1M tokens. 
-    // DeepSeek might support less. For now, we will truncate the text to the first 2 chunks (50k chars) 
-    // to prevent completely breaking context window limits, while keeping it modular for future semantic search/RAG.
+    // For local RAG, query the vector DB instead of parsing raw text
+    if (providerName.toLowerCase() === 'local' && materialId) {
+      try {
+        const db = require('../../db');
+        const questionEmbedding = await provider.generateEmbeddings(question);
+        const vectorStr = `[${questionEmbedding.join(',')}]`;
+        
+        // Find top 4 similar chunks
+        const result = await db.query(`
+          SELECT chunk_text, 1 - (embedding <=> $1::vector) as similarity
+          FROM material_chunks
+          WHERE material_id = $2
+          ORDER BY embedding <=> $1::vector
+          LIMIT 4
+        `, [vectorStr, materialId]);
+
+        if (result.rows.length > 0) {
+          const contextBlocks = result.rows.map(r => r.chunk_text).join('\\n\\n--- Next Relevant Section ---\\n\\n');
+          return provider.askQuestion(contextBlocks, question);
+        } else {
+          // Fallback if chunks aren't embedded yet
+          let contextText = text;
+          if (text.length > CHUNK_SIZE) {
+             contextText = text.slice(0, CHUNK_SIZE) + "\\n\\n[Note: Document was truncated.]";
+          }
+          return provider.askQuestion(contextText, question);
+        }
+      } catch (err) {
+        console.error('RAG Vector Search failed:', err);
+        // Fallback
+      }
+    }
+
     let contextText = text;
     if (text.length > CHUNK_SIZE * 2) {
        contextText = text.slice(0, CHUNK_SIZE * 2) + "\\n\\n[Note: Document was truncated due to length limits.]";
@@ -91,7 +122,41 @@ class AIService {
     const provider = this.getProvider(providerName);
     return provider.generateRecommendation(stats);
   }
+
+  async generateEmbeddingsForMaterial(materialId, text, providerName = 'local') {
+    const provider = this.getProvider(providerName);
+    const chunkingService = require('./chunkingService');
+    const db = require('../../db');
+
+    const chunks = chunkingService.chunkText(text);
+    
+    for (let i = 0; i < chunks.length; i++) {
+      const chunkText = chunks[i];
+      try {
+        const embedding = await provider.generateEmbeddings(chunkText);
+        
+        // Convert embedding array to vector string format for pgvector: '[1,2,3]'
+        const vectorStr = `[${embedding.join(',')}]`;
+        
+        await db.query(
+          `INSERT INTO material_chunks (material_id, chunk_index, chunk_text, embedding) 
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT (material_id, chunk_index) 
+           DO UPDATE SET chunk_text = $3, embedding = $4`,
+          [materialId, i, chunkText, vectorStr]
+        );
+      } catch (err) {
+        console.error(`Error embedding chunk ${i} for material ${materialId}:`, err.message);
+      }
+    }
+  }
+
+  async generateChatResponse(providerName, history, question, contextText = '', imageBuffer = null, mimeType = '') {
+    const provider = this.getProvider(providerName);
+    return provider.generateChatResponse(history, question, contextText, imageBuffer, mimeType);
+  }
 }
 
 // Export as singleton
 module.exports = new AIService();
+

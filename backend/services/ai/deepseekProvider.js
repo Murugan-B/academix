@@ -68,6 +68,46 @@ ${text}`;
       throw new Error('DeepSeek is currently unavailable. Please try Gemini.');
     }
   }
+
+  async generateChatResponse(history, question, contextText = '', imageBuffer = null, mimeType = '') {
+    if (!process.env.DEEPSEEK_API_KEY) {
+      throw new Error('DeepSeek API key is not configured in backend environment.');
+    }
+
+    let systemPrompt = `You are Academix AI Assistant, an expert academic tutor and study partner. Provide helpful, accurate, structured Markdown responses.`;
+    
+    if (contextText) {
+      systemPrompt += `\n\n=== UPLOADED DOCUMENT CONTEXT ===\n${contextText}\n\nSTRICT INSTRUCTION: Prioritize the uploaded document material. If the information is not present in the uploaded material, state clearly: "I couldn't find this information in the uploaded material."`;
+    }
+
+    const messages = [
+      { role: 'system', content: systemPrompt }
+    ];
+
+    if (history && history.length > 0) {
+      const recentHistory = history.slice(-6);
+      recentHistory.forEach(m => {
+        messages.push({
+          role: m.sender === 'user' ? 'user' : 'assistant',
+          content: m.content
+        });
+      });
+    }
+
+    messages.push({ role: 'user', content: question });
+
+    try {
+      const response = await this.client.chat.completions.create({
+        model: this.modelName,
+        messages: messages
+      });
+      return response.choices[0].message.content.trim();
+    } catch (error) {
+      console.error('DeepSeek generateChatResponse error:', error);
+      throw new Error(`DeepSeek API error: ${error.message}`);
+    }
+  }
 }
 
 module.exports = DeepSeekProvider;
+
