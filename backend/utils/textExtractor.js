@@ -9,6 +9,9 @@ const path = require('path');
 const os = require('os');
 const { randomUUID } = require('crypto');
 
+const AdmZip = require('adm-zip');
+const mammoth = require('mammoth');
+
 class EmptyDocumentError extends Error {
   constructor(message) {
     super(message);
@@ -40,17 +43,174 @@ class UnsupportedFormatError extends Error {
 }
 
 /**
- * Helper to save buffer to a temporary file, run a function with the path, and clean up.
+ * Robust in-memory PPTX slide text extractor preserving slide numbers, titles, bullet points, tables, and notes.
  */
-const withTempFile = async (buffer, ext, fn) => {
-  const tempPath = path.join(os.tmpdir(), `${randomUUID()}.${ext}`);
+const extractPptxFromBuffer = (buffer) => {
   try {
-    fs.writeFileSync(tempPath, buffer);
-    return await fn(tempPath);
-  } finally {
-    if (fs.existsSync(tempPath)) {
-      fs.unlinkSync(tempPath);
+    const zip = new AdmZip(buffer);
+    const zipEntries = zip.getEntries();
+    
+    // Find all slide XML files and extract their index
+    const slideEntries = [];
+    const notesMap = {}; // slideNum -> notes text
+
+    zipEntries.forEach(entry => {
+      const name = entry.entryName;
+      const slideMatch = name.match(/^ppt\/slides\/slide([0-9]+)\.xml$/i);
+      if (slideMatch) {
+        slideEntries.push({
+          slideNum: parseInt(slideMatch[1], 10),
+          entry
+        });
+      }
+      const notesMatch = name.match(/^ppt\/notesSlides\/notesSlide([0-9]+)\.xml$/i);
+      if (notesMatch) {
+        try {
+          const notesXml = entry.getData().toString('utf8');
+          const textMatches = notesXml.match(/<a:t[^>]*>([\s\S]*?)<\/a:t>/gi) || [];
+          const text = textMatches.map(m => m.replace(/<[^>]+>/g, '').trim()).filter(Boolean).join(' ');
+          if (text) notesMap[parseInt(notesMatch[1], 10)] = text;
+        } catch (e) {
+          // ignore notes error
+        }
+      }
+    });
+
+    if (slideEntries.length === 0) {
+      return '';
     }
+
+    // Sort slides numerically: Slide 1, Slide 2, ...
+    slideEntries.sort((a, b) => a.slideNum - b.slideNum);
+
+    const slideOutputs = [];
+
+    slideEntries.forEach(({ slideNum, entry }) => {
+      const xml = entry.getData().toString('utf8');
+
+      // Helper to extract text from a node
+      const getXmlText = (nodeXml) => {
+        const matches = nodeXml.match(/<a:t[^>]*>([\s\S]*?)<\/a:t>/gi) || [];
+        return matches.map(m => m.replace(/<[^>]+>/g, '')).join('').trim();
+      };
+
+      // 1. Identify Title shapes vs Body shapes
+      let titleText = '';
+      const contentParagraphs = [];
+
+      // Split XML by shape <p:sp>
+      const shapeMatches = xml.match(/<p:sp[\s\S]*?<\/p:sp>/gi) || [];
+
+      shapeMatches.forEach(shapeXml => {
+        const isTitleShape = /type="(title|ctrTitle)"/i.test(shapeXml);
+        const pMatches = shapeXml.match(/<a:p[\s\S]*?<\/a:p>/gi) || [];
+        
+        pMatches.forEach(pXml => {
+          const pText = getXmlText(pXml);
+          if (!pText) return;
+
+          if (isTitleShape && !titleText) {
+            titleText = pText;
+          } else {
+            // Check if bullet point
+            const hasBullet = /<a:buChar|<a:buAutoNum/i.test(pXml) || pXml.includes('lvl="1"') || pXml.includes('lvl="2"');
+            const prefix = hasBullet ? '- ' : '';
+            contentParagraphs.push(`${prefix}${pText}`);
+          }
+        });
+      });
+
+      // 2. Extract Tables <a:tbl>
+      const tableMatches = xml.match(/<a:tbl[\s\S]*?<\/a:tbl>/gi) || [];
+      tableMatches.forEach(tblXml => {
+        const trMatches = tblXml.match(/<a:tr[\s\S]*?<\/a:tr>/gi) || [];
+        const tableRows = [];
+        trMatches.forEach(trXml => {
+          const tcMatches = trXml.match(/<a:tc[\s\S]*?<\/a:tc>/gi) || [];
+          const cells = tcMatches.map(tcXml => getXmlText(tcXml)).filter(Boolean);
+          if (cells.length > 0) {
+            tableRows.push(cells.join(' | '));
+          }
+        });
+        if (tableRows.length > 0) {
+          contentParagraphs.push('\nTable:\n' + tableRows.join('\n'));
+        }
+      });
+
+      // 3. Fallback: if no shapes found via <p:sp>, extract all <a:t>
+      if (!titleText && contentParagraphs.length === 0) {
+        const allText = getXmlText(xml);
+        if (allText) {
+          contentParagraphs.push(allText);
+        }
+      }
+
+      // 4. Format slide block
+      const hasContent = titleText || contentParagraphs.length > 0;
+      if (!hasContent) {
+        slideOutputs.push(`Slide ${slideNum}:\n[Image-only or diagram slide]`);
+      } else {
+        let block = `Slide ${slideNum}:`;
+        if (titleText) {
+          block += `\nTitle:\n${titleText}`;
+        }
+        if (contentParagraphs.length > 0) {
+          block += `\nContent:\n${contentParagraphs.join('\n')}`;
+        }
+        if (notesMap[slideNum]) {
+          block += `\nSpeaker Notes:\n${notesMap[slideNum]}`;
+        }
+        slideOutputs.push(block);
+      }
+    });
+
+    return slideOutputs.join('\n\n');
+  } catch (err) {
+    console.error('[PPTX Extraction] Error:', err.message);
+    throw new ExtractionError(`Failed to extract PPTX slides: ${err.message}`, err);
+  }
+};
+
+/**
+ * Robust DOCX text extractor using mammoth with structured heading and table support.
+ */
+const extractDocxFromBuffer = async (buffer) => {
+  try {
+    // 1. Try mammoth markdown conversion first (preserves headings, lists, tables)
+    const result = await mammoth.convertToMarkdown({ buffer });
+    if (result && result.value && result.value.trim().length > 15) {
+      return result.value.trim();
+    }
+
+    // 2. Fallback to mammoth raw text
+    const rawResult = await mammoth.extractRawText({ buffer });
+    if (rawResult && rawResult.value && rawResult.value.trim().length > 15) {
+      return rawResult.value.trim();
+    }
+
+    // 3. Fallback to direct XML parsing of word/document.xml via AdmZip
+    const zip = new AdmZip(buffer);
+    const docEntry = zip.getEntry('word/document.xml');
+    if (docEntry) {
+      const xml = docEntry.getData().toString('utf8');
+      const pMatches = xml.match(/<w:p[\s\S]*?<\/w:p>/gi) || [];
+      const lines = pMatches.map(pXml => {
+        const isHeading = /<w:pStyle\s+w:val="Heading[1-6]"/i.test(pXml);
+        const tMatches = pXml.match(/<w:t[^>]*>([\s\S]*?)<\/w:t>/gi) || [];
+        const text = tMatches.map(m => m.replace(/<[^>]+>/g, '')).join('').trim();
+        if (!text) return '';
+        return isHeading ? `## ${text}` : text;
+      }).filter(Boolean);
+
+      if (lines.length > 0) {
+        return lines.join('\n\n');
+      }
+    }
+
+    return '';
+  } catch (err) {
+    console.error('[DOCX Extraction] Error:', err.message);
+    throw new ExtractionError(`Failed to extract DOCX text: ${err.message}`, err);
   }
 };
 
@@ -155,15 +315,9 @@ const extractTextFromMaterial = async (material) => {
       const data = await parser.getText();
       extractedText = data.text;
     } else if (ext === 'docx' || mime.includes('wordprocessingml')) {
-      extractedText = await withTempFile(buffer, 'docx', async (tempPath) => {
-        const result = await officeParser.parseOffice(tempPath);
-        return typeof result === 'string' ? result : (result?.toString() || '');
-      });
+      extractedText = await extractDocxFromBuffer(buffer);
     } else if (ext === 'pptx' || mime.includes('presentationml')) {
-      extractedText = await withTempFile(buffer, 'pptx', async (tempPath) => {
-        const result = await officeParser.parseOffice(tempPath);
-        return typeof result === 'string' ? result : (result?.toString() || '');
-      });
+      extractedText = extractPptxFromBuffer(buffer);
     } else if (ext === 'doc' || mime.includes('msword')) {
       const WordExtractor = require('word-extractor');
       const extractor = new WordExtractor();
@@ -225,6 +379,8 @@ const extractTextFromMaterial = async (material) => {
 
 module.exports = {
   extractTextFromMaterial,
+  extractPptxFromBuffer,
+  extractDocxFromBuffer,
   getSecureDownloadUrl,
   getCloudinaryType,
   EmptyDocumentError,

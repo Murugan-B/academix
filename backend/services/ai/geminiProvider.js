@@ -39,7 +39,7 @@ ${text}`;
       return response.text;
     } catch (error) {
       console.error('Gemini summarize error:', error);
-      throw new Error('Gemini is currently unavailable. Please try DeepSeek.');
+      throw new Error(`Gemini summarize error: ${error.message}`);
     }
   }
 
@@ -54,7 +54,7 @@ ${text}`;
       return response.text;
     } catch (error) {
       console.error('Gemini askQuestion error:', error);
-      throw new Error('Gemini is currently unavailable. Please try DeepSeek.');
+      throw new Error(`Gemini askQuestion error: ${error.message}`);
     }
   }
 
@@ -317,6 +317,138 @@ STRICT JSON STRUCTURE REQUIRED:
     } catch (error) {
       console.error('Gemini generateLearningContent error:', error);
       throw new Error(`Failed to generate personalized learning content: ${error.message}`);
+    }
+  }
+
+  async generateFlashcards(topic, materialText) {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error('Gemini API key is not configured in backend environment.');
+    }
+
+    const prompt = `You are Academix AI. Generate 8-10 high-yield academic study flashcards for the topic "${topic}" based on this material:
+${materialText}
+
+Return ONLY a JSON array of objects matching this schema:
+[
+  {
+    "id": 1,
+    "question": "Front of card: concept question or prompt",
+    "answer": "Back of card: concise, accurate explanation",
+    "concept": "Topic or Concept Tag",
+    "importance": "High" or "Medium"
+  }
+]`;
+
+    try {
+      const response = await this.ai.models.generateContent({
+        model: this.modelName,
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+      const raw = response.text.trim();
+      const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
+      return JSON.parse(cleaned);
+    } catch (error) {
+      console.error('Gemini generateFlashcards error:', error);
+      throw new Error(`Failed to generate flashcards: ${error.message}`);
+    }
+  }
+
+  async generateStudyPlan(studentProfile, weakTopics = [], strongTopics = []) {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error('Gemini API key is not configured in backend environment.');
+    }
+
+    const prompt = `You are an expert AI Academic Study Planner. Create an actionable, structured study plan tailored to the student.
+Student Profile: ${JSON.stringify(studentProfile)}
+Weak Topics to Prioritize: ${JSON.stringify(weakTopics)}
+Strong Topics for Quick Review: ${JSON.stringify(strongTopics)}
+
+Return ONLY a JSON object:
+{
+  "planTitle": "Personalized Academic Study Plan",
+  "targetExam": "${studentProfile.examName || 'Upcoming Exams'}",
+  "totalEstimatedHours": 12,
+  "weeklySchedule": [
+    {
+      "day": "Day 1",
+      "focus": "High-Priority Weak Topics",
+      "tasks": [
+        { "time": "45 mins", "topic": "Topic Name", "action": "Review concepts & study material", "type": "Learning" },
+        { "time": "30 mins", "topic": "Topic Name", "action": "Practice targeted MCQs", "type": "Practice" }
+      ]
+    }
+  ],
+  "keyMilestones": [
+    "Milestone 1",
+    "Milestone 2"
+  ],
+  "revisionTips": [
+    "Tip 1",
+    "Tip 2"
+  ]
+}`;
+
+    try {
+      const response = await this.ai.models.generateContent({
+        model: this.modelName,
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+      const raw = response.text.trim();
+      const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
+      return JSON.parse(cleaned);
+    } catch (error) {
+      console.error('Gemini generateStudyPlan error:', error);
+      throw new Error(`Failed to generate study plan: ${error.message}`);
+    }
+  }
+
+  async generateSmartRevision(topic, materialText, wrongQuestions = []) {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error('Gemini API key is not configured in backend environment.');
+    }
+
+    let wrongQuestionsBlock = '';
+    if (wrongQuestions && wrongQuestions.length > 0) {
+      wrongQuestionsBlock = `Student's previous missed questions:\n` +
+        wrongQuestions.map(q => `- ${q.question} (Correct: ${q.correct_answer})`).join('\n');
+    }
+
+    const prompt = `You are Academix AI. Generate a 2-minute Smart Revision cheat sheet for "${topic}" based on this material:
+${materialText}
+${wrongQuestionsBlock}
+
+Return ONLY a JSON object:
+{
+  "topic": "${topic}",
+  "estimatedReadTime": "2 mins",
+  "coreFormulaOrRule": "Central rule or definition in one sentence",
+  "rapidPoints": [
+    "Quick revision takeaway 1",
+    "Quick revision takeaway 2",
+    "Quick revision takeaway 3"
+  ],
+  "frequentlyTestedConcepts": [
+    { "concept": "Concept Name", "whyImportant": "Why examiners ask this" }
+  ],
+  "examPitfalls": [
+    "Common trap or misconception to avoid"
+  ]
+}`;
+
+    try {
+      const response = await this.ai.models.generateContent({
+        model: this.modelName,
+        contents: prompt,
+        config: { responseMimeType: 'application/json' },
+      });
+      const raw = response.text.trim();
+      const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
+      return JSON.parse(cleaned);
+    } catch (error) {
+      console.error('Gemini generateSmartRevision error:', error);
+      throw new Error(`Failed to generate revision cheat sheet: ${error.message}`);
     }
   }
 }

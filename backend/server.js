@@ -23,6 +23,7 @@ const assistantRoutes = require('./routes/assistantRoutes');
 const quizRoutes = require('./routes/quizRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 const learningRoutes = require('./routes/learningRoutes');
+const mentorRoutes = require('./routes/mentorRoutes');
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -38,6 +39,7 @@ app.use('/api/ai', aiRoutes);
 app.use('/api/quizzes', quizRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/learning', learningRoutes);
+app.use('/api/mentor', mentorRoutes);
 
 
 // Base route

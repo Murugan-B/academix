@@ -4,21 +4,24 @@ const OpenAI = require('openai');
 class OpenRouterProvider extends AIProvider {
   constructor() {
     super();
-    this.client = new OpenAI({
-      baseURL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
-      apiKey: process.env.OPENROUTER_API_KEY || '',
-      defaultHeaders: {
-        'HTTP-Referer': 'https://academix.app',
-        'X-Title': 'Academix'
-      },
-      timeout: 90000, // 90 second timeout
-      maxRetries: 0    // don't retry on timeout — let the user retry explicitly
-    });
     this.modelName = process.env.OPENROUTER_MODEL || 'openrouter/free';
   }
 
   _isConfigured() {
-    return !!(process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.trim());
+    return !!(process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.trim() && process.env.OPENROUTER_API_KEY !== 'your_new_key_here');
+  }
+
+  _getClient() {
+    return new OpenAI({
+      baseURL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
+      apiKey: process.env.OPENROUTER_API_KEY || 'not-configured',
+      defaultHeaders: {
+        'HTTP-Referer': 'https://academix.app',
+        'X-Title': 'Academix'
+      },
+      timeout: 90000,
+      maxRetries: 0
+    });
   }
 
   async _chat(messages, jsonMode = false) {
@@ -35,7 +38,7 @@ class OpenRouterProvider extends AIProvider {
       if (jsonMode) {
         params.response_format = { type: 'json_object' };
       }
-      const response = await this.client.chat.completions.create(params);
+      const response = await this._getClient().chat.completions.create(params);
       const duration = Date.now() - start;
       console.log(`[AI][OpenRouter] response received | model=${this.modelName} | duration=${duration}ms`);
       return response.choices[0].message.content;
@@ -235,7 +238,7 @@ Be direct and specific. No generic filler phrases.`
     let systemContent = `You are Academix AI Assistant, an expert academic tutor and study partner.
 
 LANGUAGE DETECTION: Detect the user's language and style from their message and respond accordingly:
-- Casual Tamil/Thanglish (e.g. "Explain this da", "Idha sollu") → respond in simple Thanglish/Tamil
+- Casual Tamil/Thanglish (e.g. "Explain this da", "Idha sollu", "Idha simple ah explain pannu") → respond in simple Thanglish/Tamil
 - Formal English → respond in structured academic English
 - Mixed → match the user's style naturally
 
@@ -243,10 +246,6 @@ Provide helpful, accurate responses formatted in Markdown.`;
 
     if (contextText) {
       systemContent += `\n\n=== UPLOADED DOCUMENT CONTEXT ===\n${contextText}\n\nIMPORTANT: Prioritize the uploaded material. If the answer is not in the material, state: "I couldn't find this information in the uploaded material."`;
-    }
-
-    if (imageBuffer && !contextText) {
-      systemContent += `\n\n[Note: An image was uploaded. OpenRouter text models cannot directly analyze images. Please use Gemini for image analysis, or describe the image content in text.]`;
     }
 
     const messages = [{ role: 'system', content: systemContent }];
@@ -260,10 +259,35 @@ Provide helpful, accurate responses formatted in Markdown.`;
       });
     }
 
-    messages.push({ role: 'user', content: question });
+    if (imageBuffer) {
+      const base64Data = imageBuffer.toString('base64');
+      const dataUri = `data:${mimeType || 'image/png'};base64,${base64Data}`;
+      messages.push({
+        role: 'user',
+        content: [
+          { type: 'text', text: question || 'Please analyze this academic image and explain the concepts.' },
+          {
+            type: 'image_url',
+            image_url: {
+              url: dataUri
+            }
+          }
+        ]
+      });
+    } else {
+      messages.push({ role: 'user', content: question });
+    }
 
-    const raw = await this._chat(messages);
-    return raw.trim();
+    try {
+      const raw = await this._chat(messages);
+      return raw.trim();
+    } catch (chatErr) {
+      const errMsg = chatErr.message.toLowerCase();
+      if (imageBuffer && (errMsg.includes('image') || errMsg.includes('vision') || errMsg.includes('modality') || errMsg.includes('multimodal') || errMsg.includes('400'))) {
+        throw new Error(`The configured OpenRouter model (${this.modelName}) does not support image/vision analysis. Please switch to Gemini for image-based questions or configure a vision model.`);
+      }
+      throw chatErr;
+    }
   }
 
   async generateLearningContent(topic, materialText, wrongQuestions = [], meta = {}) {
@@ -373,6 +397,143 @@ Return ONLY valid JSON matching this schema:
     } catch (err) {
       console.error('[AI][OpenRouter] generateLearningContent parse error:', err.message);
       throw new Error(`OpenRouter failed to generate learning content: ${err.message}`);
+    }
+  }
+
+  async generateFlashcards(topic, materialText) {
+    console.log('[AI][OpenRouter] task=flashcards');
+    const messages = [
+      {
+        role: 'system',
+        content: `You are Academix AI. Generate high-yield study flashcards in strict JSON array format only.`
+      },
+      {
+        role: 'user',
+        content: `Generate 8-10 high-yield study flashcards for "${topic}" from this material:
+${materialText}
+
+Return ONLY a JSON array:
+[
+  {
+    "id": 1,
+    "question": "Front of card question or prompt",
+    "answer": "Back of card explanation",
+    "concept": "Topic or Concept Tag",
+    "importance": "High"
+  }
+]`
+      }
+    ];
+
+    try {
+      const raw = await this._chat(messages, true);
+      const cleaned = this._cleanJson(raw);
+      const parsed = JSON.parse(cleaned);
+      if (Array.isArray(parsed)) return parsed;
+      if (parsed.flashcards && Array.isArray(parsed.flashcards)) return parsed.flashcards;
+      return [];
+    } catch (err) {
+      console.error('[AI][OpenRouter] generateFlashcards parse error:', err.message);
+      throw new Error(`OpenRouter failed to generate flashcards: ${err.message}`);
+    }
+  }
+
+  async generateStudyPlan(studentProfile, weakTopics = [], strongTopics = []) {
+    console.log('[AI][OpenRouter] task=study_plan');
+    const messages = [
+      {
+        role: 'system',
+        content: `You are Academix AI, an academic study planning expert. Always return valid JSON only.`
+      },
+      {
+        role: 'user',
+        content: `Create an actionable, structured study plan for this student.
+Student Profile: ${JSON.stringify(studentProfile)}
+Weak Topics to Prioritize: ${JSON.stringify(weakTopics)}
+Strong Topics for Quick Review: ${JSON.stringify(strongTopics)}
+
+Return ONLY valid JSON matching this schema:
+{
+  "planTitle": "Personalized Academic Study Plan",
+  "targetExam": "${studentProfile.examName || 'Upcoming Exams'}",
+  "totalEstimatedHours": 12,
+  "weeklySchedule": [
+    {
+      "day": "Day 1",
+      "focus": "High-Priority Weak Topics",
+      "tasks": [
+        { "time": "45 mins", "topic": "Topic Name", "action": "Review concepts & study material", "type": "Learning" },
+        { "time": "30 mins", "topic": "Topic Name", "action": "Practice targeted MCQs", "type": "Practice" }
+      ]
+    }
+  ],
+  "keyMilestones": [
+    "Milestone 1",
+    "Milestone 2"
+  ],
+  "revisionTips": [
+    "Tip 1",
+    "Tip 2"
+  ]
+}`
+      }
+    ];
+
+    try {
+      const raw = await this._chat(messages, true);
+      const cleaned = this._cleanJson(raw);
+      return JSON.parse(cleaned);
+    } catch (err) {
+      console.error('[AI][OpenRouter] generateStudyPlan parse error:', err.message);
+      throw new Error(`OpenRouter failed to generate study plan: ${err.message}`);
+    }
+  }
+
+  async generateSmartRevision(topic, materialText, wrongQuestions = []) {
+    console.log('[AI][OpenRouter] task=smart_revision');
+    let wrongQuestionsBlock = '';
+    if (wrongQuestions && wrongQuestions.length > 0) {
+      wrongQuestionsBlock = `Student's previous missed questions:\n` +
+        wrongQuestions.map(q => `- ${q.question} (Correct: ${q.correct_answer})`).join('\n');
+    }
+
+    const messages = [
+      {
+        role: 'system',
+        content: `You are Academix AI. Generate a concise 2-minute revision sheet in strict JSON format only.`
+      },
+      {
+        role: 'user',
+        content: `Generate a 2-minute Smart Revision cheat sheet for "${topic}" from this material:
+${materialText}
+${wrongQuestionsBlock}
+
+Return ONLY valid JSON:
+{
+  "topic": "${topic}",
+  "estimatedReadTime": "2 mins",
+  "coreFormulaOrRule": "Central rule or definition in one sentence",
+  "rapidPoints": [
+    "Quick revision point 1",
+    "Quick revision point 2"
+  ],
+  "frequentlyTestedConcepts": [
+    { "concept": "Concept Name", "whyImportant": "Why examiners ask this" }
+  ],
+  "examPitfalls": [
+    "Common trap or misconception to avoid"
+  ]
+}`
+      }
+    ];
+
+    try {
+      const raw = await this._chat(messages, true);
+      const cleaned = this._cleanJson(raw);
+      return JSON.parse(cleaned);
+    } catch (err) {
+      console.error('[AI][OpenRouter] generateSmartRevision parse error:', err.message);
+      throw new Error(`OpenRouter failed to generate revision: ${err.message}`);
     }
   }
 }

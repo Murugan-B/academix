@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Bot, User, Send, Plus, Trash2, Search, Paperclip, X, FileText,
   Sparkles, AlertCircle, RefreshCw, CheckCircle2, HelpCircle, BookOpen,
-  Layers, StopCircle, Image as ImageIcon, ZoomIn, PanelLeftClose, PanelLeftOpen, Menu
+  Layers, StopCircle, Image as ImageIcon, ZoomIn, PanelLeftClose, PanelLeftOpen, Menu, Info,
+  Mic, MicOff, Volume2, VolumeX
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import api from '../api/axios';
@@ -122,12 +123,10 @@ export default function AIAssistant() {
   const [orphanAttachments, setOrphanAttachments] = useState([]);
 
   const [inputMessage, setInputMessage] = useState('');
-  const [selectedProvider, setSelectedProvider] = useState('local');
+  const [selectedProvider, setSelectedProvider] = useState('gemini');
   const [providersStatus, setProvidersStatus] = useState({
-    local: { status: 'available', label: 'Ollama (Local)' },
-    gemini: { status: 'unavailable', label: 'Gemini' },
-    openrouter: { status: 'unavailable', label: 'OpenRouter', model: 'openrouter/free' },
-    deepseek: { status: 'unavailable', label: 'DeepSeek' }
+    gemini: { status: 'available', label: 'Gemini', model: 'gemini-2.5-flash' },
+    openrouter: { status: 'available', label: 'OpenRouter', model: 'openrouter/free' }
   });
 
   const [searchQuery, setSearchQuery] = useState('');
@@ -151,6 +150,138 @@ export default function AIAssistant() {
 
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
+  const textareaRef = useRef(null);
+  const [attachmentHint, setAttachmentHint] = useState('');
+
+  // Voice Input (Speech-to-Text)
+  const [isListening, setIsListening] = useState(false);
+  const [voiceStatusText, setVoiceStatusText] = useState('');
+  const recognitionRef = useRef(null);
+
+  // Voice Response (Text-to-Speech)
+  const [playingMessageId, setPlayingMessageId] = useState(null);
+
+  // Cleanup speech synthesis on unmount
+  useEffect(() => {
+    return () => {
+      if (window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      if (recognitionRef.current) {
+        try { recognitionRef.current.abort(); } catch (e) {}
+      }
+    };
+  }, []);
+
+  const toggleVoiceInput = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      showToast('Speech recognition is not supported in this browser.', 'info');
+      return;
+    }
+
+    if (isListening) {
+      if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch (e) {}
+      }
+      setIsListening(false);
+      setVoiceStatusText('');
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsListening(true);
+        setVoiceStatusText('Listening... Speak now');
+      };
+
+      recognition.onresult = (event) => {
+        let finalTranscript = '';
+        for (let i = event.resultIndex; i < event.results.length; ++i) {
+          if (event.results[i].isFinal) {
+            finalTranscript += event.results[i][0].transcript;
+          }
+        }
+        if (finalTranscript) {
+          setInputMessage(prev => {
+            const trimmed = prev.trim();
+            return trimmed ? `${trimmed} ${finalTranscript}` : finalTranscript;
+          });
+          setVoiceStatusText('');
+          setTimeout(() => {
+            textareaRef.current?.focus();
+          }, 50);
+        }
+      };
+
+      recognition.onerror = (event) => {
+        console.warn('Speech recognition error:', event.error);
+        if (event.error === 'not-allowed') {
+          showToast('Could not access microphone. Please grant microphone permissions.', 'error');
+        } else if (event.error !== 'no-speech') {
+          showToast(`Speech recognition: ${event.error}`, 'info');
+        }
+        setIsListening(false);
+        setVoiceStatusText('');
+      };
+
+      recognition.onend = () => {
+        setIsListening(false);
+        setVoiceStatusText('');
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err) {
+      console.error('Failed to start voice recognition:', err);
+      showToast('Could not access microphone.', 'error');
+      setIsListening(false);
+      setVoiceStatusText('');
+    }
+  };
+
+  const speakResponse = (messageId, text) => {
+    if (!window.speechSynthesis) {
+      showToast('Speech synthesis is not supported in this browser.', 'info');
+      return;
+    }
+
+    if (playingMessageId === messageId) {
+      window.speechSynthesis.cancel();
+      setPlayingMessageId(null);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+
+    // Clean markdown symbols for cleaner speech
+    const cleanText = text
+      .replace(/```[\s\S]*?```/g, ' Code block omitted. ')
+      .replace(/`([^`]+)`/g, '$1')
+      .replace(/[*#_~]/g, '')
+      .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+      .trim();
+
+    const utterance = new SpeechSynthesisUtterance(cleanText);
+    utterance.rate = 1.0;
+    utterance.pitch = 1.0;
+
+    utterance.onend = () => {
+      setPlayingMessageId(null);
+    };
+
+    utterance.onerror = () => {
+      setPlayingMessageId(null);
+    };
+
+    setPlayingMessageId(messageId);
+    window.speechSynthesis.speak(utterance);
+  };
 
   useEffect(() => {
     fetchProvidersStatus();
@@ -304,6 +435,7 @@ export default function AIAssistant() {
         headers: { 'Content-Type': 'multipart/form-data' }
       });
       setPendingAttachment(res.data);
+      setAttachmentHint('');
       showToast(`Attached ${file.name} successfully.`, 'success');
     } catch (err) {
       console.error('Upload error:', err);
@@ -327,8 +459,17 @@ export default function AIAssistant() {
 
   // ── Send Message ────────────────────────────────────────────────────────────
   const sendMessage = async (customText = null) => {
-    const textToSend = customText || inputMessage;
-    if (!textToSend.trim() || loading) return;
+    let textToSend = customText || inputMessage;
+    if (!textToSend.trim()) {
+      if (pendingAttachment) {
+        textToSend = isImage(pendingAttachment.file_type, pendingAttachment.file_name)
+          ? 'Please analyze this image and explain the concepts in detail.'
+          : 'Please analyze this uploaded document and explain the key concepts in detail.';
+      } else {
+        return;
+      }
+    }
+    if (loading) return;
 
     let targetConvId = activeConvId;
     if (!targetConvId) {
@@ -439,26 +580,38 @@ export default function AIAssistant() {
   const getQuickActions = () => {
     if (userRole === 'STUDENT') {
       return [
-        { label: 'Explain Simply', icon: Sparkles, text: 'Can you explain this concept in simple, easy-to-understand terms with clear examples?' },
-        { label: 'Summarize', icon: BookOpen, text: 'Please provide a structured, bulleted summary of this topic/material.' },
-        { label: 'Create MCQs', icon: HelpCircle, text: 'Generate 5 practice multiple-choice questions (with options A, B, C, D and explanations) based on this material.' },
-        { label: 'Important Points', icon: CheckCircle2, text: 'What are the top 5 key takeaways and important exam points from this material?' },
-        { label: 'Step by Step', icon: Layers, text: 'Explain the step-by-step process or method for solving/understanding this topic.' }
+        { label: 'Explain Simply', icon: Sparkles, text: 'Can you explain this concept in simple, easy-to-understand terms with clear examples?', requiresMaterial: false },
+        { label: 'Summarize', icon: BookOpen, text: 'Please provide a structured, bulleted summary of this topic/material.', requiresMaterial: false },
+        { label: 'Create MCQs', icon: HelpCircle, text: 'Create 5 high-quality multiple choice questions with detailed rationale for each option.', requiresMaterial: true },
+        { label: 'Important Points', icon: CheckCircle2, text: 'What are the top 5 key takeaways and important exam points from this material?', requiresMaterial: false },
+        { label: 'Step by Step', icon: Layers, text: 'Explain the step-by-step process or method for solving/understanding this topic.', requiresMaterial: false }
       ];
     } else if (userRole === 'FACULTY' || userRole === 'MENTOR') {
       return [
-        { label: 'Teaching Notes', icon: Sparkles, text: 'Create structured lecture notes and key teaching points for explaining this topic to students.' },
-        { label: 'Generate Questions', icon: HelpCircle, text: 'Generate a set of short-answer and long-answer exam questions with sample solutions.' },
-        { label: 'Create MCQs', icon: CheckCircle2, text: 'Create 5 high-quality multiple choice questions with detailed rationale for each option.' },
-        { label: 'Analyse Document', icon: BookOpen, text: 'Analyze this uploaded academic document and summarize its primary learning objectives and concepts.' }
+        { label: 'Teaching Notes', icon: Sparkles, text: 'Create detailed teaching notes from the provided material.', requiresMaterial: true },
+        { label: 'Generate Questions', icon: HelpCircle, text: 'Generate high-quality questions from the provided material.', requiresMaterial: true },
+        { label: 'Create MCQs', icon: CheckCircle2, text: 'Create 5 high-quality multiple choice questions with detailed rationale for each option.', requiresMaterial: true },
+        { label: 'Analyse Document', icon: BookOpen, text: 'Analyse the uploaded document and explain the important concepts.', requiresMaterial: true }
       ];
     } else {
       return [
-        { label: 'Report Insights', icon: Sparkles, text: 'Extract key strategic insights, metrics, and actionable recommendations from this document.' },
-        { label: 'Analyse Document', icon: BookOpen, text: 'Analyze this academic/administrative document and summarize key findings.' },
-        { label: 'Extract Key Points', icon: CheckCircle2, text: 'Summarize the critical action items, policy points, and highlights from this text.' }
+        { label: 'Report Insights', icon: Sparkles, text: 'Extract key strategic insights, metrics, and actionable recommendations from this document.', requiresMaterial: true },
+        { label: 'Analyse Document', icon: BookOpen, text: 'Analyse the uploaded document and explain the important concepts.', requiresMaterial: true },
+        { label: 'Extract Key Points', icon: CheckCircle2, text: 'Summarize the critical action items, policy points, and highlights from this text.', requiresMaterial: false }
       ];
     }
+  };
+
+  const handleQuickActionClick = (action) => {
+    setInputMessage(action.text);
+    if (action.requiresMaterial && !pendingAttachment) {
+      setAttachmentHint('Attach a study material to use this action.');
+    } else {
+      setAttachmentHint('');
+    }
+    setTimeout(() => {
+      textareaRef.current?.focus();
+    }, 50);
   };
 
   const filteredConversations = conversations.filter(c =>
@@ -678,10 +831,8 @@ export default function AIAssistant() {
                 onChange={(e) => setSelectedProvider(e.target.value)}
                 className="bg-transparent text-[11px] md:text-xs font-bold text-slate-700 outline-none cursor-pointer"
               >
-                <option value="local">Ollama (Local)</option>
                 <option value="gemini">Gemini</option>
-                <option value="openrouter">OpenRouter</option>
-                <option value="deepseek">DeepSeek</option>
+                <option value="openrouter">OpenRouter ({providersStatus.openrouter?.model || 'openrouter/free'})</option>
               </select>
             </div>
           </div>
@@ -704,7 +855,8 @@ export default function AIAssistant() {
                   return (
                     <button
                       key={idx}
-                      onClick={() => sendMessage(action.text)}
+                      type="button"
+                      onClick={() => handleQuickActionClick(action)}
                       className="flex items-center gap-2.5 p-3 text-left bg-white border border-slate-200/80 hover:border-indigo-300 hover:shadow-md rounded-2xl transition-all group"
                     >
                       <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl group-hover:bg-indigo-600 group-hover:text-white transition-colors">
@@ -776,25 +928,22 @@ export default function AIAssistant() {
 
           {/* Loading indicator with Stop button */}
           {loading && (
-            <div className="flex gap-3 max-w-3xl mr-auto">
-              <div className="shrink-0 w-8 h-8 rounded-2xl bg-white border border-slate-200 flex items-center justify-center text-indigo-600 shadow-sm">
-                <Bot className="w-4 h-4" />
+            <div className="flex gap-3 max-w-2xl mr-auto items-start animate-in fade-in slide-in-from-bottom-2 duration-300">
+              <div className="shrink-0 w-8 h-8 rounded-2xl bg-white border border-slate-200 text-indigo-600 flex items-center justify-center shadow-sm">
+                <Bot className="w-4 h-4 animate-spin text-indigo-500" />
               </div>
-              <div className="flex flex-col gap-2 items-start">
-                <div className="p-4 bg-white border border-slate-200/80 rounded-3xl rounded-tl-none shadow-sm flex items-center gap-3">
-                  <div className="flex gap-1.5">
-                    <span className="w-2 h-2 bg-indigo-600 rounded-full animate-bounce" />
-                    <span className="w-2 h-2 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: '0.15s' }} />
-                    <span className="w-2 h-2 bg-indigo-600 rounded-full animate-bounce" style={{ animationDelay: '0.3s' }} />
-                  </div>
-                  <span className="text-xs font-semibold text-slate-500 animate-pulse">Academix AI is thinking...</span>
+              <div className="bg-white border border-slate-200/80 rounded-3xl rounded-tl-none p-4 shadow-sm space-y-3">
+                <div className="flex items-center gap-2 text-xs font-semibold text-slate-500">
+                  <span className="inline-block w-2 h-2 rounded-full bg-indigo-600 animate-ping" />
+                  <span>Academix AI is thinking...</span>
                 </div>
                 <button
+                  type="button"
                   onClick={stopGeneration}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 border border-rose-200 rounded-xl transition-colors"
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl text-xs font-bold border border-rose-200 transition-colors"
                 >
-                  <StopCircle className="w-3.5 h-3.5" />
-                  Stop generating
+                  <StopCircle className="w-3.5 h-3.5 text-rose-600" />
+                  <span>Stop generating</span>
                 </button>
               </div>
             </div>
@@ -810,8 +959,9 @@ export default function AIAssistant() {
             {getQuickActions().map((action, idx) => (
               <button
                 key={idx}
-                onClick={() => sendMessage(action.text)}
-                className="shrink-0 text-xs font-semibold text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 border border-indigo-100 rounded-xl px-3 py-1.5 transition-colors flex items-center gap-1.5"
+                type="button"
+                onClick={() => handleQuickActionClick(action)}
+                className="shrink-0 text-xs font-semibold text-indigo-700 bg-indigo-50/80 hover:bg-indigo-100 border border-indigo-100 rounded-xl px-3 py-1.5 transition-colors flex items-center gap-1.5 cursor-pointer"
               >
                 <action.icon className="w-3.5 h-3.5 text-indigo-500" />
                 {action.label}
@@ -820,11 +970,11 @@ export default function AIAssistant() {
           </div>
         )}
 
-        {/* Pending Attachment Preview — shown before send */}
+        {/* Attachment upload preview bar (above composer) */}
         {(uploading || pendingAttachment) && (
-          <div className="mx-4 mt-2 shrink-0">
+          <div className="px-4 py-2 border-t border-slate-100 bg-white/95 backdrop-blur-sm animate-in slide-in-from-bottom-2 duration-200">
             {uploading ? (
-              <div className="flex items-center gap-2.5 bg-indigo-50 border border-indigo-200/80 rounded-2xl px-4 py-3">
+              <div className="flex items-center gap-3 bg-indigo-50/60 border border-indigo-100 rounded-2xl p-3">
                 <RefreshCw className="w-4 h-4 text-indigo-600 animate-spin shrink-0" />
                 <div>
                   <p className="text-xs font-bold text-indigo-700">Uploading & analyzing...</p>
@@ -869,6 +1019,41 @@ export default function AIAssistant() {
 
         {/* Bottom Input Area */}
         <div className="p-4 border-t border-slate-100 bg-white shrink-0">
+          {/* Active Voice Listening Banner */}
+          {isListening && (
+            <div className="mb-2.5 flex items-center justify-between gap-2 px-3.5 py-2 bg-rose-50 border border-rose-200/80 rounded-2xl text-xs font-semibold text-rose-800 animate-pulse">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="w-2.5 h-2.5 rounded-full bg-rose-600 animate-ping shrink-0" />
+                <span className="truncate">{voiceStatusText || 'Listening... Speak now'}</span>
+              </div>
+              <button
+                type="button"
+                onClick={toggleVoiceInput}
+                className="text-[11px] font-bold text-rose-700 bg-white px-2.5 py-1 rounded-xl border border-rose-200 hover:bg-rose-100 transition-colors shrink-0"
+              >
+                Stop
+              </button>
+            </div>
+          )}
+
+          {/* Non-blocking Material Attachment Hint */}
+          {attachmentHint && !pendingAttachment && !isListening && (
+            <div className="mb-2.5 flex items-center justify-between gap-2 px-3.5 py-2 bg-amber-50/90 border border-amber-200/80 rounded-2xl text-xs font-semibold text-amber-900 animate-in fade-in slide-in-from-bottom-1 duration-200">
+              <div className="flex items-center gap-2 min-w-0">
+                <Info className="w-4 h-4 text-amber-600 shrink-0" />
+                <span className="truncate">{attachmentHint}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAttachmentHint('')}
+                className="p-1 hover:bg-amber-100 rounded-lg text-amber-700 transition-colors shrink-0"
+                title="Dismiss"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          )}
+
           <form
             onSubmit={(e) => {
               e.preventDefault();
@@ -897,11 +1082,32 @@ export default function AIAssistant() {
               }
             </button>
 
+            {/* Microphone Button for Voice Input */}
+            <button
+              type="button"
+              onClick={toggleVoiceInput}
+              disabled={loading}
+              className={`p-3 border rounded-2xl transition-all disabled:opacity-50 shrink-0 ${
+                isListening
+                  ? 'bg-rose-600 text-white border-rose-600 shadow-md shadow-rose-200 animate-pulse'
+                  : 'text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 border-slate-200'
+              }`}
+              title={isListening ? "Stop listening" : "Voice input (Dictate prompt)"}
+            >
+              {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+            </button>
+
             {/* Input Textarea */}
             <div className="flex-1 bg-slate-50 border border-slate-200 rounded-2xl p-2.5 focus-within:ring-2 focus-within:ring-indigo-500/20 focus-within:border-indigo-500 transition-all">
               <textarea
+                ref={textareaRef}
                 value={inputMessage}
-                onChange={(e) => setInputMessage(e.target.value)}
+                onChange={(e) => {
+                  setInputMessage(e.target.value);
+                  if (attachmentHint && !e.target.value.trim()) {
+                    setAttachmentHint('');
+                  }
+                }}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter' && !e.shiftKey) {
                     e.preventDefault();
@@ -928,7 +1134,7 @@ export default function AIAssistant() {
             ) : (
               <button
                 type="submit"
-                disabled={!inputMessage.trim() || loading}
+                disabled={(!inputMessage.trim() && !pendingAttachment) || loading}
                 className="p-3 bg-gradient-to-r from-indigo-600 to-violet-600 text-white rounded-2xl hover:from-indigo-700 hover:to-violet-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md shadow-indigo-100 shrink-0"
               >
                 <Send className="w-5 h-5" />

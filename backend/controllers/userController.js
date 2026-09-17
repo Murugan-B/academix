@@ -90,10 +90,13 @@ exports.getMentees = async (req, res) => {
   const mentor_id = req.user.id;
   try {
     const result = await db.query(
-      `SELECT u.id, u.name, u.email, u.roll_number, u.batch_start_year, u.batch_end_year 
+      `SELECT u.id, u.name, u.email, u.roll_number, u.batch_start_year, u.batch_end_year,
+              d.name as department_name
        FROM users u 
        JOIN mentor_students ms ON u.id = ms.student_id 
-       WHERE ms.mentor_id = $1`, [mentor_id]
+       LEFT JOIN departments d ON u.department_id = d.id
+       WHERE ms.mentor_id = $1
+       ORDER BY u.batch_start_year ASC, u.name ASC`, [mentor_id]
     );
     res.json(result.rows);
   } catch (err) {

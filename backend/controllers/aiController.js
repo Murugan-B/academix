@@ -174,9 +174,9 @@ exports.askQuestion = async (req, res) => {
     } catch (aiError) {
       console.error(`[AI CHAT] AI Error:`, aiError.message, aiError.stack);
       let providerName = provider.toLowerCase();
-      if (providerName === 'gemini') throw new Error('Gemini API request failed.');
-      if (providerName === 'deepseek') throw new Error('DeepSeek API request failed.');
-      throw new Error(`${provider} API request failed.`);
+      if (providerName === 'gemini') throw new Error(`Gemini API request failed: ${aiError.message}`);
+      if (providerName === 'openrouter') throw new Error(`OpenRouter API request failed: ${aiError.message}`);
+      throw new Error(`${provider} API request failed: ${aiError.message}`);
     }
 
     // Save assistant answer to history
@@ -231,9 +231,9 @@ exports.getChatHistory = async (req, res) => {
 
 exports.getHealth = async (req, res) => {
   try {
-    const provider = process.env.AI_PROVIDER || 'local';
-    
-    // Check vector DB status
+    const geminiKey = !!process.env.GEMINI_API_KEY;
+    const openrouterKey = !!process.env.OPENROUTER_API_KEY;
+
     let indexedMaterials = 0;
     let vectorChunks = 0;
     
@@ -247,26 +247,14 @@ exports.getHealth = async (req, res) => {
       console.error('Vector DB check failed:', dbErr.message);
     }
 
-    let isOnline = false;
-    
-    if (provider === 'local') {
-      try {
-        const axios = require('axios');
-        const baseUrl = process.env.AI_BASE_URL || 'http://localhost:11434';
-        await axios.get(baseUrl, { timeout: 3000 });
-        isOnline = true;
-      } catch (e) {
-        isOnline = false;
-      }
-    } else {
-      isOnline = true; // For Gemini/Deepseek, assume online if API key exists
-    }
-
     res.json({
-      status: isOnline ? 'ok' : 'unavailable',
-      provider: provider,
-      model: process.env.AI_MODEL || 'default',
-      embeddingModel: process.env.AI_EMBEDDING_MODEL || 'default',
+      status: (geminiKey || openrouterKey) ? 'ok' : 'unavailable',
+      provider: geminiKey ? 'gemini' : (openrouterKey ? 'openrouter' : 'none'),
+      model: process.env.OPENROUTER_MODEL || 'gemini-2.5-flash',
+      providers: {
+        gemini: geminiKey ? 'available' : 'unavailable',
+        openrouter: openrouterKey ? 'available' : 'unavailable'
+      },
       indexedMaterials,
       vectorChunks
     });

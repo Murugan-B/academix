@@ -1,4 +1,5 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
+import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
 import UsersAndRoles from './pages/UsersAndRoles';
 import Settings from './pages/Settings';
@@ -22,30 +23,35 @@ function App() {
     <>
       <ToastContainer />
       <Routes>
-      <Route path="/login" element={<Login />} />
-      
-      <Route path="/" element={<Layout />}>
-        <Route path="super-admin" element={<SuperAdminDashboard />} />
-        <Route path="institute-admin" element={<InstituteAdminDashboard />} />
-        <Route path="hod" element={<HodDashboard />} />
-        <Route path="faculty" element={<FacultyDashboard />} />
-        <Route path="student" element={<StudentDashboard />} />
-        <Route path="students/:studentId" element={<StudentDetails />} />
-        <Route path="users" element={<UsersAndRoles />} />
-        <Route path="settings" element={<Settings />} />
-        <Route path="subjects" element={<Subjects />} />
-        <Route path="subjects/:subjectId" element={<SubjectDetails />} />
-        <Route path="attempt-review/:attemptId" element={<AttemptReviewPage />} />
-        <Route path="ai-assistant" element={<AIAssistant />} />
-        <Route path="ai-learning" element={<AILearning />} />
-        <Route index element={<Navigate to="/login" replace />} />
-      </Route>
-      
-      {/* Full-screen quiz page — outside Layout so no sidebar/header renders */}
-      <Route path="/quiz/:materialId" element={<QuizPage />} />
+        {/* Public Landing Page */}
+        <Route path="/" element={<LandingPage />} />
 
-      <Route path="*" element={<Navigate to="/login" replace />} />
-    </Routes>
+        {/* Public Login Page */}
+        <Route path="/login" element={<Login />} />
+        
+        {/* Protected Dashboard & Application Workspace */}
+        <Route element={<Layout />}>
+          <Route path="super-admin" element={<SuperAdminDashboard />} />
+          <Route path="institute-admin" element={<InstituteAdminDashboard />} />
+          <Route path="hod" element={<HodDashboard />} />
+          <Route path="faculty" element={<FacultyDashboard />} />
+          <Route path="student" element={<StudentDashboard />} />
+          <Route path="students/:studentId" element={<StudentDetails />} />
+          <Route path="users" element={<UsersAndRoles />} />
+          <Route path="settings" element={<Settings />} />
+          <Route path="subjects" element={<Subjects />} />
+          <Route path="subjects/:subjectId" element={<SubjectDetails />} />
+          <Route path="attempt-review/:attemptId" element={<AttemptReviewPage />} />
+          <Route path="ai-assistant" element={<AIAssistant />} />
+          <Route path="ai-learning" element={<AILearning />} />
+        </Route>
+        
+        {/* Full-screen quiz page — outside Layout */}
+        <Route path="/quiz/:materialId" element={<QuizPage />} />
+
+        {/* Fallback */}
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
     </>
   );
 }

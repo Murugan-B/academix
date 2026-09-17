@@ -122,35 +122,99 @@ export default function FacultyDashboard() {
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 lg:gap-8 mb-8">
         <div className="lg:col-span-2 bg-white/80 backdrop-blur-xl rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-white p-8">
-          <h2 className="text-xl font-bold text-slate-800 mb-6">Your Assigned Mentees</h2>
-          {mentees.length === 0 ? (
-            <p className="text-slate-500">You have no mentees assigned yet.</p>
-          ) : (
-            <div className="divide-y divide-slate-100">
-              {mentees.map((mentee) => {
-                const currentYear = new Date().getFullYear();
-                let year = 'N/A';
-                if (mentee.batch_start_year) {
-                  let diff = currentYear - mentee.batch_start_year;
-                  if (new Date().getMonth() >= 7) diff += 1;
-                  year = diff === 1 ? '1st Year' : diff === 2 ? '2nd Year' : diff === 3 ? '3rd Year' : diff >= 4 ? '4th Year' : 'Incoming';
-                }
-
-                return (
-                  <Link 
-                    to={`/students/${mentee.id}`} 
-                    key={mentee.id} 
-                    className="py-4 flex justify-between items-center hover:bg-slate-50 transition-colors -mx-4 px-4 rounded-xl"
-                  >
-                    <div>
-                      <h4 className="font-bold text-indigo-600 hover:text-indigo-800">{mentee.name}</h4>
-                      <p className="text-sm text-slate-500">{mentee.roll_number} • {year}</p>
-                    </div>
-                    <ArrowUpRight className="w-5 h-5 text-slate-400" />
-                  </Link>
-                );
-              })}
+          <div className="flex items-center justify-between mb-6">
+            <div>
+              <h2 className="text-xl font-bold text-slate-900">Your Assigned Mentees</h2>
+              <p className="text-xs text-slate-500 mt-0.5">Organized dynamically by academic year</p>
             </div>
+            <span className="text-xs font-bold px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full border border-indigo-100">
+              {mentees.length} Total {mentees.length === 1 ? 'Mentee' : 'Mentees'}
+            </span>
+          </div>
+
+          {mentees.length === 0 ? (
+            <p className="text-slate-500 text-sm py-4">You have no mentees assigned yet.</p>
+          ) : (
+            (() => {
+              const getAcademicYearLabel = (batchStartYear) => {
+                if (!batchStartYear) return 'Year not available';
+                const currentYear = new Date().getFullYear();
+                let diff = currentYear - parseInt(batchStartYear);
+                if (new Date().getMonth() >= 7) diff += 1;
+                if (diff === 1) return '1st Year';
+                if (diff === 2) return '2nd Year';
+                if (diff === 3) return '3rd Year';
+                if (diff >= 4) return '4th Year';
+                return 'Incoming';
+              };
+
+              const groupedMentees = mentees.reduce((acc, mentee) => {
+                const yearLabel = getAcademicYearLabel(mentee.batch_start_year);
+                if (!acc[yearLabel]) acc[yearLabel] = [];
+                acc[yearLabel].push(mentee);
+                return acc;
+              }, {});
+
+              const yearSortOrder = ['4th Year', '3rd Year', '2nd Year', '1st Year', 'Incoming', 'Year not available'];
+              const sortedYears = Object.keys(groupedMentees).sort((a, b) => {
+                const idxA = yearSortOrder.indexOf(a);
+                const idxB = yearSortOrder.indexOf(b);
+                if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+                if (idxA !== -1) return -1;
+                if (idxB !== -1) return 1;
+                return a.localeCompare(b);
+              });
+
+              return (
+                <div className="space-y-6">
+                  {sortedYears.map((yearKey) => {
+                    const studentsInYear = groupedMentees[yearKey] || [];
+                    return (
+                      <div key={yearKey} className="space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                          <h3 className="text-sm font-extrabold text-slate-700 tracking-wide uppercase flex items-center gap-2">
+                            <span className="w-2 h-2 rounded-full bg-indigo-600" />
+                            {yearKey}
+                          </h3>
+                          <span className="text-xs font-semibold text-slate-400">
+                            {studentsInYear.length} {studentsInYear.length === 1 ? 'student' : 'students'}
+                          </span>
+                        </div>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                          {studentsInYear.map((mentee) => (
+                            <Link 
+                              to={`/students/${mentee.id}`} 
+                              key={mentee.id} 
+                              className="p-4 bg-slate-50/70 hover:bg-indigo-50/50 border border-slate-100 hover:border-indigo-200 rounded-2xl transition-all group flex items-center justify-between gap-3 shadow-xs"
+                            >
+                              <div className="flex items-center gap-3 min-w-0">
+                                <div className="w-10 h-10 rounded-xl bg-white group-hover:bg-indigo-600 text-indigo-600 group-hover:text-white flex items-center justify-center font-bold text-sm border border-slate-200/60 group-hover:border-transparent transition-colors shrink-0 shadow-xs">
+                                  {mentee.name.charAt(0).toUpperCase()}
+                                </div>
+                                <div className="min-w-0">
+                                  <h4 className="font-bold text-slate-900 group-hover:text-indigo-600 transition-colors truncate">{mentee.name}</h4>
+                                  <p className="text-xs text-slate-500 font-medium truncate">
+                                    Reg No: <span className="text-slate-700">{mentee.roll_number || 'N/A'}</span>
+                                  </p>
+                                  <p className="text-[11px] text-slate-400 truncate">
+                                    Dept: {mentee.department_name || user?.department_name || 'Department'}
+                                  </p>
+                                </div>
+                              </div>
+                              <span className="text-xs font-bold text-indigo-600 bg-white group-hover:bg-indigo-600 group-hover:text-white px-3 py-1.5 rounded-xl border border-indigo-100 group-hover:border-transparent transition-all shadow-xs flex items-center gap-1 shrink-0">
+                                View Student
+                                <ArrowUpRight className="w-3.5 h-3.5" />
+                              </span>
+                            </Link>
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()
           )}
         </div>
         <div>

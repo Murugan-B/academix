@@ -224,8 +224,6 @@ function MaterialViewer({ material, onDownload, onOpenSummary, onOpenChat, onOpe
                   >
                     <option value="gemini">Gemini</option>
                     <option value="openrouter">OpenRouter</option>
-                    <option value="local">Local (Ollama)</option>
-                    <option value="deepseek">DeepSeek</option>
                   </select>
                   <button
                     onClick={generateQuiz}

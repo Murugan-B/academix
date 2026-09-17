@@ -4,7 +4,7 @@ import ReactMarkdown from 'react-markdown';
 import api from '../api/axios';
 
 export default function AIChatbotPanel({ material, onClose }) {
-  const [provider, setProvider] = useState('Local');
+  const [provider, setProvider] = useState('Gemini');
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
@@ -297,10 +297,8 @@ export default function AIChatbotPanel({ material, onClose }) {
                 onChange={(e) => setProvider(e.target.value)}
                 className="bg-white border border-slate-200 text-xs font-bold text-slate-700 rounded-lg px-2 py-1.5 outline-none focus:ring-2 focus:ring-indigo-500"
               >
-                <option value="Local">Local (Ollama)</option>
                 <option value="Gemini">Gemini</option>
                 <option value="OpenRouter">OpenRouter</option>
-                <option value="DeepSeek">DeepSeek</option>
               </select>
             </>
           )}

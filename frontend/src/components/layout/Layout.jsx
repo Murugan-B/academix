@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Outlet, useNavigate, Link, useLocation } from 'react-router-dom';
+import { Outlet, useNavigate, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LogOut, BookOpen, Users, Settings, LayoutDashboard, BookText, Bot, Sparkles,
   PanelLeftClose, PanelLeftOpen, Menu, X
@@ -11,7 +11,8 @@ export default function Layout() {
   const currentPath = location.pathname;
   
   const userStr = localStorage.getItem('user');
-  const user = userStr ? JSON.parse(userStr) : null;
+  const token = localStorage.getItem('token');
+  const user = (userStr && token) ? JSON.parse(userStr) : null;
   const role = user?.role || 'STUDENT';
 
   // Persistent main application sidebar state
@@ -19,6 +20,11 @@ export default function Layout() {
     return localStorage.getItem('academix_sidebar_collapsed') === 'true';
   });
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
+
+  // Authentication guard
+  if (!user) {
+    return <Navigate to="/login" replace />;
+  }
 
   const toggleSidebar = () => {
     setIsSidebarCollapsed(prev => {
@@ -172,7 +178,7 @@ export default function Layout() {
             )}
           </div>
 
-          {/* ONE Clean Toggle Button */}
+          {/* Toggle Button */}
           <button
             onClick={toggleSidebar}
             className="p-1.5 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50/80 rounded-xl transition-all"
@@ -277,7 +283,7 @@ export default function Layout() {
             <Outlet />
           </div>
         ) : (
-          <div className="p-6 md:p-10 lg:p-12 max-w-7xl mx-auto min-h-full w-full">
+          <div className="p-4 md:p-6 lg:p-8 max-w-7xl mx-auto min-h-full w-full">
             <Outlet />
           </div>
         )}
@@ -285,4 +291,3 @@ export default function Layout() {
     </div>
   );
 }
-

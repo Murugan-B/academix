@@ -8,6 +8,7 @@ const path = require('path');
 const os = require('os');
 const { randomUUID } = require('crypto');
 const axios = require('axios');
+const { classifyQuery, retrieveCurrentInformation, formatCurrentContextBlock } = require('../services/ai/freshnessService');
 
 const withTempFile = async (buffer, ext, fn) => {
   const tempPath = path.join(os.tmpdir(), `${randomUUID()}.${ext}`);
@@ -21,6 +22,8 @@ const withTempFile = async (buffer, ext, fn) => {
   }
 };
 
+const { extractPptxFromBuffer, extractDocxFromBuffer } = require('../utils/textExtractor');
+
 const extractTextFromBuffer = async (buffer, filename, mimetype) => {
   const ext = filename.split('.').pop().toLowerCase();
   const mime = (mimetype || '').toLowerCase();
@@ -29,31 +32,16 @@ const extractTextFromBuffer = async (buffer, filename, mimetype) => {
     if (ext === 'pdf' || mime.includes('pdf')) {
       const parser = new PDFParse(new Uint8Array(buffer), { verbosity: 0 });
       const data = await parser.getText();
-      return data.text.trim();
+      return (data.text || '').trim();
     } else if (ext === 'docx' || mime.includes('wordprocessingml')) {
-      return await withTempFile(buffer, 'docx', async (tempPath) => {
-        const res = await officeParser.parseOffice(tempPath);
-        return typeof res === 'string' ? res.trim() : (res?.toString() || '').trim();
-      });
+      const text = await extractDocxFromBuffer(buffer);
+      return (text || '').trim();
     } else if (ext === 'pptx' || mime.includes('presentationml')) {
-      return await withTempFile(buffer, 'pptx', async (tempPath) => {
-        const res = await officeParser.parseOffice(tempPath);
-        return typeof res === 'string' ? res.trim() : (res?.toString() || '').trim();
-      });
+      const text = extractPptxFromBuffer(buffer);
+      return (text || '').trim();
     } else if (ext === 'txt' || mime.includes('text/plain')) {
       return buffer.toString('utf-8').trim();
     } else if (['png', 'jpg', 'jpeg', 'webp'].includes(ext) || mime.includes('image/')) {
-      try {
-        const { createWorker } = require('tesseract.js');
-        const worker = await createWorker('eng');
-        const ret = await worker.recognize(buffer);
-        await worker.terminate();
-        if (ret && ret.data && ret.data.text && ret.data.text.trim().length > 10) {
-          return ret.data.text.trim();
-        }
-      } catch (ocrErr) {
-        console.error('Image OCR error:', ocrErr.message);
-      }
       return '';
     }
     return '';
@@ -233,16 +221,14 @@ exports.sendMessage = async (req, res) => {
   try {
     const userId = req.user.id;
     const { id: conversationId } = req.params;
-    const { message, provider = 'local', attachmentId } = req.body;
+    const { message, provider = 'gemini', attachmentId } = req.body;
 
     if (!message || !message.trim()) {
       return res.status(400).json({ success: false, message: 'Message content is required.' });
     }
 
-    const allowedProviders = ['local', 'gemini', 'deepseek', 'openrouter'];
-    if (!allowedProviders.includes(provider.toLowerCase())) {
-      return res.status(400).json({ success: false, message: `Invalid provider '${provider}'. Allowed providers: ${allowedProviders.join(', ')}` });
-    }
+    const allowedProviders = ['gemini', 'openrouter'];
+    const chosenProvider = allowedProviders.includes(provider.toLowerCase()) ? provider.toLowerCase() : 'gemini';
 
     // Verify ownership
     const convRes = await db.query(
@@ -273,14 +259,14 @@ exports.sendMessage = async (req, res) => {
       `UPDATE ai_conversations 
        SET title = $1, selected_provider = $2, updated_at = NOW() 
        WHERE id = $3`,
-      [updatedTitle, provider, conversationId]
+      [updatedTitle, chosenProvider, conversationId]
     );
 
     // Save user message to DB
     const userMsgRes = await db.query(
       `INSERT INTO ai_messages (conversation_id, sender, content, provider) 
        VALUES ($1, 'user', $2, $3) RETURNING *`,
-      [conversationId, message.trim(), provider]
+      [conversationId, message.trim(), chosenProvider]
     );
 
     // Fetch conversation history
@@ -303,24 +289,48 @@ exports.sendMessage = async (req, res) => {
 
     if (attachmentsRes.rowCount > 0) {
       const texts = [];
-      attachmentsRes.rows.forEach(att => {
+      for (const att of attachmentsRes.rows) {
         if (att.extracted_text && att.extracted_text.trim()) {
           texts.push(`--- File: ${att.file_name} ---\n${att.extracted_text}`);
         }
-        if (att.file_type && att.file_type.includes('image/') && att.file_url && att.file_url.startsWith('data:')) {
-          const parts = att.file_url.split(',');
-          if (parts.length === 2) {
-            imageBuffer = Buffer.from(parts[1], 'base64');
-            mimeType = att.file_type;
+        if (att.file_type && (att.file_type.includes('image/') || /\.(png|jpg|jpeg|webp)$/i.test(att.file_name))) {
+          if (!imageBuffer && att.file_url) {
+            try {
+              if (att.file_url.startsWith('data:')) {
+                const parts = att.file_url.split(',');
+                if (parts.length === 2) {
+                  imageBuffer = Buffer.from(parts[1], 'base64');
+                  mimeType = att.file_type || 'image/png';
+                }
+              } else if (att.file_url.startsWith('http')) {
+                const imgRes = await axios.get(att.file_url, { responseType: 'arraybuffer', timeout: 15000 });
+                imageBuffer = Buffer.from(imgRes.data);
+                mimeType = att.file_type || 'image/png';
+              }
+            } catch (imgErr) {
+              console.warn('[AI Assistant] Failed to load image buffer for multimodal input:', imgErr.message);
+            }
           }
         }
-      });
+      }
       contextText = texts.join('\n\n');
+    }
+
+    // Query classification & Freshness routing layer
+    const queryClassification = classifyQuery(message.trim(), Boolean(contextText && contextText.trim()));
+    if (queryClassification.isTimeSensitive) {
+      try {
+        const freshSources = await retrieveCurrentInformation(message.trim());
+        const freshContextBlock = formatCurrentContextBlock(freshSources);
+        contextText = contextText ? `${contextText}\n\n${freshContextBlock}` : freshContextBlock;
+      } catch (freshErr) {
+        console.warn('[AI Assistant] Freshness retrieval notice:', freshErr.message);
+      }
     }
 
     // Bail out early if client already disconnected before AI generation
     if (clientDisconnected) {
-      console.log(`[AI][${provider}] Client disconnected before AI generation — skipping.`);
+      console.log(`[AI][${chosenProvider}] Client disconnected before AI generation — skipping.`);
       return;
     }
 
@@ -328,7 +338,7 @@ exports.sendMessage = async (req, res) => {
     let assistantReply = '';
     try {
       assistantReply = await aiService.generateChatResponse(
-        provider,
+        chosenProvider,
         historyRes.rows,
         message.trim(),
         contextText,
@@ -338,18 +348,14 @@ exports.sendMessage = async (req, res) => {
     } catch (aiErr) {
       // If client disconnected during generation, suppress the error
       if (clientDisconnected) {
-        console.log(`[AI][${provider}] Generation cancelled (client disconnected).`);
+        console.log(`[AI][${chosenProvider}] Generation cancelled (client disconnected).`);
         return;
       }
-      console.error(`AI Generation Error (${provider}):`, aiErr.message);
+      console.error(`AI Generation Error (${chosenProvider}):`, aiErr.message);
       let userFriendlyMessage = aiErr.message;
-      if (provider === 'local') {
-        userFriendlyMessage = `Local Ollama is unavailable or taking too long. Please ensure Ollama is running. Error: ${aiErr.message}`;
-      } else if (provider === 'gemini') {
-        userFriendlyMessage = `Gemini API request failed. Please check backend GEMINI_API_KEY environment variable. Error: ${aiErr.message}`;
-      } else if (provider === 'deepseek') {
-        userFriendlyMessage = `DeepSeek API request failed. Please check backend DEEPSEEK_API_KEY environment variable. Error: ${aiErr.message}`;
-      } else if (provider === 'openrouter') {
+      if (chosenProvider === 'gemini') {
+        userFriendlyMessage = `Gemini API request failed. Please check backend GEMINI_API_KEY. Error: ${aiErr.message}`;
+      } else if (chosenProvider === 'openrouter') {
         userFriendlyMessage = `OpenRouter request failed. Please check OPENROUTER_API_KEY. Error: ${aiErr.message}`;
       }
       return res.status(500).json({ success: false, message: userFriendlyMessage, error: aiErr.message });
@@ -357,7 +363,7 @@ exports.sendMessage = async (req, res) => {
 
     // If client disconnected after generation completed, skip saving incomplete state
     if (clientDisconnected) {
-      console.log(`[AI][${provider}] Response generated but client disconnected — not saving assistant message.`);
+      console.log(`[AI][${chosenProvider}] Response generated but client disconnected — not saving assistant message.`);
       return;
     }
 
@@ -365,7 +371,7 @@ exports.sendMessage = async (req, res) => {
     const assistantMsgRes = await db.query(
       `INSERT INTO ai_messages (conversation_id, sender, content, provider) 
        VALUES ($1, 'assistant', $2, $3) RETURNING *`,
-      [conversationId, assistantReply, provider]
+      [conversationId, assistantReply, chosenProvider]
     );
 
     // Update message_id on attachment if relevant
@@ -388,31 +394,23 @@ exports.sendMessage = async (req, res) => {
   }
 };
 
-
 exports.getProvidersStatus = async (req, res) => {
   try {
-    let localOnline = false;
-    try {
-      const baseUrl = process.env.AI_BASE_URL || 'http://localhost:11434';
-      await axios.get(baseUrl, { timeout: 2000 });
-      localOnline = true;
-    } catch (e) {
-      localOnline = false;
-    }
-
     const geminiAvailable = !!process.env.GEMINI_API_KEY;
-    const deepseekAvailable = !!process.env.DEEPSEEK_API_KEY;
     const openrouterKey = process.env.OPENROUTER_API_KEY || '';
-    const openrouterAvailable = !!(openrouterKey && openrouterKey.trim() && openrouterKey !== 'your_openrouter_api_key_here');
+    const openrouterAvailable = !!(openrouterKey && openrouterKey.trim() && openrouterKey !== 'your_new_key_here');
 
     res.json({
-      local: { status: localOnline ? 'available' : 'unavailable', label: 'Ollama (Local)' },
-      gemini: { status: geminiAvailable ? 'available' : 'unavailable', label: 'Gemini' },
-      deepseek: { status: deepseekAvailable ? 'available' : 'unavailable', label: 'DeepSeek' },
+      gemini: { 
+        status: geminiAvailable ? 'available' : 'unavailable', 
+        label: 'Gemini',
+        model: 'gemini-2.5-flash',
+        configured: geminiAvailable 
+      },
       openrouter: {
         status: openrouterAvailable ? 'available' : 'unavailable',
         label: 'OpenRouter',
-        model: process.env.OPENROUTER_MODEL || 'openrouter/auto',
+        model: process.env.OPENROUTER_MODEL || 'openrouter/free',
         configured: openrouterAvailable
       }
     });
