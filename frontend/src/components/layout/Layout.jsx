@@ -96,8 +96,26 @@ export default function Layout() {
   ];
 
   return (
-    <div className="flex h-screen bg-[#f8fafc] selection:bg-indigo-100 selection:text-indigo-900 overflow-hidden">
+    <div className="flex h-screen bg-[#f4f6fc] selection:bg-indigo-100 selection:text-indigo-900 overflow-hidden relative font-sans">
       
+      {/* GLOBAL VISIBLE AMBIENT BACKGROUND SYSTEM */}
+      <div className="fixed inset-0 pointer-events-none -z-10 overflow-hidden academix-ambient-bg">
+        {/* Soft diffused Top-Left Purple Glow */}
+        <div className="absolute -top-28 -left-28 w-[680px] h-[680px] bg-purple-500/14 rounded-full blur-[130px] pointer-events-none" />
+        
+        {/* Soft diffused Top-Right Lavender / Indigo Glow */}
+        <div className="absolute -top-20 -right-20 w-[720px] h-[720px] bg-indigo-500/12 rounded-full blur-[140px] pointer-events-none" />
+        
+        {/* Soft diffused Bottom-Right Cool Sky / Blue Glow */}
+        <div className="absolute -bottom-28 -right-24 w-[760px] h-[760px] bg-sky-400/12 rounded-full blur-[140px] pointer-events-none" />
+
+        {/* Soft diffused Bottom-Left Lavender Glow */}
+        <div className="absolute -bottom-28 -left-24 w-[620px] h-[620px] bg-violet-500/10 rounded-full blur-[120px] pointer-events-none" />
+
+        {/* Ultra-subtle Micro Dot Grid for SaaS Texture */}
+        <div className="absolute inset-0 academix-dot-pattern opacity-35 pointer-events-none" />
+      </div>
+
       {/* MOBILE BACKDROP */}
       {isMobileNavOpen && (
         <div 
@@ -107,7 +125,7 @@ export default function Layout() {
       )}
 
       {/* MOBILE DRAWER SIDEBAR */}
-      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-indigo-50 shadow-2xl flex flex-col transition-transform duration-300 md:hidden ${
+      <aside className={`fixed inset-y-0 left-0 z-50 w-72 bg-white/95 backdrop-blur-xl border-r border-indigo-100/60 shadow-2xl flex flex-col transition-transform duration-300 md:hidden ${
         isMobileNavOpen ? 'translate-x-0' : '-translate-x-full'
       }`}>
         <div className="p-6 border-b border-indigo-50 flex items-center justify-between">
@@ -137,7 +155,7 @@ export default function Layout() {
                 onClick={() => setIsMobileNavOpen(false)}
                 className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm border ${
                   item.active
-                    ? 'text-indigo-700 bg-indigo-50/80 font-bold border-indigo-100/50'
+                    ? 'text-indigo-700 bg-indigo-50/90 font-bold border-indigo-100'
                     : 'text-slate-600 hover:text-indigo-700 hover:bg-slate-50 border-transparent'
                 }`}
               >
@@ -160,11 +178,11 @@ export default function Layout() {
       </aside>
 
       {/* DESKTOP MAIN APPLICATION SIDEBAR */}
-      <aside className={`bg-white/70 backdrop-blur-2xl border-r border-indigo-50/70 shadow-[4px_0_24px_rgba(0,0,0,0.02)] hidden md:flex md:flex-col relative z-20 shrink-0 transition-all duration-300 ${
+      <aside className={`bg-white/80 backdrop-blur-2xl border-r border-indigo-100/60 shadow-[4px_0_24px_rgba(0,0,0,0.02)] hidden md:flex md:flex-col relative z-20 shrink-0 transition-all duration-300 ${
         isSidebarCollapsed ? 'w-20' : 'w-72'
       }`}>
         {/* Header with Logo + Collapse Toggle */}
-        <div className={`border-b border-indigo-50/70 transition-all ${
+        <div className={`border-b border-indigo-100/60 transition-all ${
           isSidebarCollapsed ? 'p-4 flex flex-col items-center gap-3' : 'p-6 flex items-center justify-between'
         }`}>
           <div className="flex items-center gap-3">
@@ -212,7 +230,7 @@ export default function Layout() {
                     : 'gap-3 px-4 py-3.5 w-full'
                 } ${
                   item.active 
-                    ? 'text-indigo-700 bg-indigo-50/80 font-semibold shadow-xs border-indigo-100/50' 
+                    ? 'text-indigo-700 bg-indigo-50/90 font-semibold shadow-xs border-indigo-150/70' 
                     : 'text-slate-600 hover:text-indigo-700 hover:bg-white/80 font-medium hover:shadow-xs border-transparent hover:border-slate-100'
                 }`}
                 title={isSidebarCollapsed ? item.label : undefined}
@@ -231,7 +249,7 @@ export default function Layout() {
         </nav>
 
         {/* Footer Logout */}
-        <div className={`border-t border-indigo-50/70 bg-white/30 transition-all ${
+        <div className={`border-t border-indigo-100/60 bg-white/40 transition-all ${
           isSidebarCollapsed ? 'p-3 flex justify-center' : 'p-6'
         }`}>
           <button 
@@ -249,16 +267,8 @@ export default function Layout() {
 
       {/* Main Content Area */}
       <main className={`flex-1 flex flex-col relative h-full ${isFullScreen ? 'overflow-hidden' : 'overflow-auto'}`}>
-        {!isFullScreen && (
-          <>
-            <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-indigo-50/50 to-transparent -z-10 pointer-events-none" />
-            <div className="absolute top-[-10%] right-[-5%] w-96 h-96 bg-violet-200/30 rounded-full blur-3xl -z-10 animate-pulse pointer-events-none" style={{ animationDuration: '8s' }} />
-            <div className="absolute top-[20%] left-[-5%] w-72 h-72 bg-indigo-200/30 rounded-full blur-3xl -z-10 animate-pulse pointer-events-none" style={{ animationDuration: '10s' }} />
-          </>
-        )}
-
         {/* Mobile Top Header */}
-        <header className="bg-white/80 backdrop-blur-md shadow-xs sticky top-0 z-30 p-4 flex justify-between items-center md:hidden border-b border-slate-100 shrink-0">
+        <header className="bg-white/90 backdrop-blur-md shadow-xs sticky top-0 z-30 p-4 flex justify-between items-center md:hidden border-b border-slate-150 shrink-0">
           <div className="flex items-center gap-3">
             <button
               onClick={() => setIsMobileNavOpen(true)}
