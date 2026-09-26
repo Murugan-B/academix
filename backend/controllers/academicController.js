@@ -170,14 +170,125 @@ exports.getTopics = async (req, res) => {
 };
 
 exports.createTopic = async (req, res) => {
-  const { topic_number, title, description } = req.body;
+  const { topic_number, title, description, material_title, material_description } = req.body;
+  const lessonId = req.params.lessonId;
+  const userId = req.user.id;
+
+  // 1. Validate topic title
+  if (!title || !title.trim()) {
+    return res.status(400).json({ error: 'Topic title is required.' });
+  }
+
+  // 2. Validate mandatory material attachment
+  if (!req.file) {
+    return res.status(400).json({ error: 'Material is required to create a topic.' });
+  }
+
+  // 3. Validate file size (max 15 MB) and extensions
+  if (req.file.size > 15 * 1024 * 1024) {
+    return res.status(400).json({ error: 'File size must be less than 15 MB.' });
+  }
+
+  const allowedExtensions = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt'];
+  const fileExt = req.file.originalname.split('.').pop().toLowerCase();
+  if (!allowedExtensions.includes(fileExt)) {
+    return res.status(400).json({ error: 'Unsupported file type. Allowed formats: PDF, DOC/DOCX, PPT/PPTX, XLS/XLSX, TXT.' });
+  }
+
   try {
-    const result = await db.query(
-      'INSERT INTO topics (lesson_id, topic_number, title, description, created_by) VALUES ($1, $2, $3, $4, $5) RETURNING *',
-      [req.params.lessonId, topic_number, title, description, req.user.id]
+    const uniqueFilename = `${Date.now()}-${req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+
+    // Upload to Cloudinary authenticated/raw storage
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        resource_type: 'raw',
+        type: 'authenticated',
+        folder: 'academic_materials',
+        public_id: uniqueFilename
+      },
+      async (error, cloudResult) => {
+        if (error) {
+          console.error('[CREATE_TOPIC] Cloudinary upload error:', error.message);
+          return res.status(500).json({ error: 'Failed to upload material to storage service.' });
+        }
+
+        const client = await db.pool.connect();
+        try {
+          await client.query('BEGIN');
+
+          // 1. Insert Topic
+          const topicRes = await client.query(
+            `INSERT INTO topics (lesson_id, topic_number, title, description, created_by)
+             VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+            [lessonId, parseInt(topic_number, 10) || 1, title.trim(), description ? description.trim() : null, userId]
+          );
+          const newTopic = topicRes.rows[0];
+
+          // 2. Insert Material linked to new Topic
+          const matTitle = material_title ? material_title.trim() : title.trim();
+          const matDesc = material_description ? material_description.trim() : (description ? description.trim() : null);
+
+          const matRes = await client.query(
+            `INSERT INTO materials (
+              topic_id, title, description, file_name, file_url,
+              cloudinary_public_id, file_type, file_size, uploaded_by, source_type
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'OFFICIAL') RETURNING *`,
+            [
+              newTopic.id,
+              matTitle,
+              matDesc,
+              req.file.originalname,
+              cloudResult.secure_url,
+              cloudResult.public_id,
+              req.file.mimetype,
+              req.file.size,
+              userId
+            ]
+          );
+          const newMaterial = matRes.rows[0];
+
+          await client.query('COMMIT');
+
+          res.status(201).json({
+            ...newTopic,
+            material: newMaterial
+          });
+
+          // Run background text extraction & RAG embeddings
+          if (process.env.AI_PROVIDER === 'local' || process.env.AI_PROVIDER === 'gemini' || process.env.AI_PROVIDER === 'openrouter') {
+            const { extractTextFromMaterial } = require('../utils/textExtractor');
+            const aiService = require('../services/ai/aiService');
+
+            extractTextFromMaterial(newMaterial)
+              .then(({ text }) => {
+                if (text && typeof aiService.generateEmbeddingsForMaterial === 'function') {
+                  return aiService.generateEmbeddingsForMaterial(newMaterial.id, text, process.env.AI_PROVIDER || 'local');
+                }
+              })
+              .catch(err => {
+                console.warn('[CREATE_TOPIC] Background extraction note:', err.message);
+              });
+          }
+
+        } catch (dbErr) {
+          await client.query('ROLLBACK');
+          try {
+            await cloudinary.uploader.destroy(cloudResult.public_id, { resource_type: 'raw', type: 'authenticated' });
+          } catch (cleanErr) {
+            console.warn('[CREATE_TOPIC] Cleanup error:', cleanErr.message);
+          }
+          console.error('[CREATE_TOPIC] Database error:', dbErr.message);
+          return res.status(500).json({ error: dbErr.message });
+        } finally {
+          client.release();
+        }
+      }
     );
-    res.status(201).json(result.rows[0]);
+
+    uploadStream.end(req.file.buffer);
   } catch (err) {
+    console.error('[CREATE_TOPIC] Error:', err.message);
     res.status(500).json({ error: err.message });
   }
 };
@@ -204,10 +315,13 @@ exports.deleteTopic = async (req, res) => {
   }
 };
 
-// --- MATERIALS ---
+// --- MATERIALS (OFFICIAL COURSE MATERIALS) ---
 exports.getMaterials = async (req, res) => {
   try {
-    const result = await db.query('SELECT * FROM materials WHERE topic_id = $1 ORDER BY created_at ASC', [req.params.topicId]);
+    const result = await db.query(
+      "SELECT * FROM materials WHERE topic_id = $1 AND (source_type = 'OFFICIAL' OR source_type IS NULL) ORDER BY created_at ASC",
+      [req.params.topicId]
+    );
     res.json(result.rows);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -245,8 +359,8 @@ exports.uploadMaterial = async (req, res) => {
         if (error) return res.status(500).json({ error: error.message });
         
         const dbResult = await db.query(
-          `INSERT INTO materials (topic_id, title, description, file_name, file_url, cloudinary_public_id, file_type, file_size, uploaded_by)
-           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING *`,
+          `INSERT INTO materials (topic_id, title, description, file_name, file_url, cloudinary_public_id, file_type, file_size, uploaded_by, source_type)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'OFFICIAL') RETURNING *`,
           [
             topicId, 
             title, 

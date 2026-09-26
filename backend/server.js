@@ -24,6 +24,8 @@ const quizRoutes = require('./routes/quizRoutes');
 const analyticsRoutes = require('./routes/analyticsRoutes');
 const learningRoutes = require('./routes/learningRoutes');
 const mentorRoutes = require('./routes/mentorRoutes');
+const studentResourceRoutes = require('./routes/studentResourceRoutes');
+const knowledgeGraphRoutes = require('./routes/knowledgeGraphRoutes');
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -32,8 +34,10 @@ app.use('/api/institutes', instituteRoutes);
 app.use('/api/departments', departmentRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/resources', resourceRoutes);
+app.use('/api/student-resources', studentResourceRoutes);
 app.use('/api/subjects', subjectRoutes);
 app.use('/api/academic', academicRoutes);
+app.use('/api/knowledge-graph', knowledgeGraphRoutes);
 app.use('/api/ai/assistant', assistantRoutes);
 app.use('/api/ai', aiRoutes);
 app.use('/api/quizzes', quizRoutes);

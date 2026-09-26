@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import api from '../api/axios';
 import NotificationPanel from '../components/NotificationPanel';
 import CreateNotification from '../components/CreateNotification';
+import CohortSummaryCard from '../components/CohortSummaryCard';
 
 export default function FacultyDashboard() {
   const [showModal, setShowModal] = useState(false);
@@ -220,6 +221,11 @@ export default function FacultyDashboard() {
         <div>
           <NotificationPanel />
         </div>
+      </div>
+
+      {/* Cohort Learning Gap Intelligence Summary */}
+      <div className="mb-8">
+        <CohortSummaryCard />
       </div>
 
       {/* Add Student Modal */}

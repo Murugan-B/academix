@@ -277,10 +277,12 @@ exports.sendMessage = async (req, res) => {
       [conversationId, userMsgRes.rows[0].id]
     );
 
-    // Prepare context from attachments
+    // Prepare context from attachments and authorized academic knowledge base
     let contextText = '';
     let imageBuffer = null;
     let mimeType = '';
+    const citations = [];
+    let grounding = 'GENERAL';
 
     const attachmentsRes = await db.query(
       `SELECT * FROM ai_chat_attachments WHERE conversation_id = $1 ORDER BY created_at DESC`,
@@ -292,6 +294,15 @@ exports.sendMessage = async (req, res) => {
       for (const att of attachmentsRes.rows) {
         if (att.extracted_text && att.extracted_text.trim()) {
           texts.push(`--- File: ${att.file_name} ---\n${att.extracted_text}`);
+
+          // Extract citation from attachment
+          citations.push({
+            materialTitle: att.file_name,
+            fileType: att.file_type || 'DOCUMENT',
+            sourceType: 'ATTACHMENT',
+            isAttachment: true
+          });
+          grounding = 'GROUNDED';
         }
         if (att.file_type && (att.file_type.includes('image/') || /\.(png|jpg|jpeg|webp)$/i.test(att.file_name))) {
           if (!imageBuffer && att.file_url) {
@@ -316,6 +327,104 @@ exports.sendMessage = async (req, res) => {
       contextText = texts.join('\n\n');
     }
 
+    // Academic Curriculum RAG Retrieval (with strict department & institute authorization)
+    try {
+      const subjectId = req.body.subjectId || null;
+      let ragQuery = `
+        SELECT mc.id, mc.material_id, mc.chunk_index, mc.chunk_text, mc.metadata,
+               m.title as material_title, m.file_name, m.file_type,
+               s.id as subject_id, s.name as subject_name, s.code as subject_code, u.title as unit_title,
+               t.title as topic_title
+        FROM material_chunks mc
+        JOIN materials m ON mc.material_id = m.id
+        LEFT JOIN topics t ON m.topic_id = t.id
+        LEFT JOIN lessons l ON t.lesson_id = l.id
+        LEFT JOIN units u ON l.unit_id = u.id
+        LEFT JOIN subjects s ON u.subject_id = s.id
+        LEFT JOIN departments d ON s.department_id = d.id
+        WHERE (m.source_type = 'OFFICIAL' OR m.source_type IS NULL)
+      `;
+      const ragParams = [];
+
+      // Multi-tenant isolation
+      if (req.user.role !== 'SUPER_ADMIN') {
+        if (req.user.institute_id) {
+          ragParams.push(req.user.institute_id);
+          ragQuery += ` AND (d.institute_id = $${ragParams.length} OR d.institute_id IS NULL)`;
+        }
+        if (req.user.department_id) {
+          ragParams.push(req.user.department_id);
+          ragQuery += ` AND (s.department_id = $${ragParams.length} OR s.department_id IS NULL)`;
+        }
+      }
+
+      // Subject-scoped retrieval
+      if (subjectId) {
+        ragParams.push(subjectId);
+        ragQuery += ` AND s.id = $${ragParams.length}`;
+      }
+
+      // Filter query tokens (removing general conversational stop-words)
+      const stopWords = new Set([
+        'the', 'is', 'are', 'was', 'were', 'a', 'an', 'and', 'or', 'of', 'in', 'to', 'for', 'on', 'with',
+        'by', 'at', 'from', 'as', 'into', 'like', 'through', 'after', 'over', 'between', 'out', 'against',
+        'during', 'without', 'before', 'under', 'around', 'among', 'what', 'who', 'where', 'when', 'why',
+        'how', 'which', 'explain', 'tell', 'about', 'this', 'that', 'these', 'those', 'can', 'could',
+        'should', 'would', 'may', 'might', 'must', 'have', 'has', 'had', 'do', 'does', 'did', 'help',
+        'give', 'some', 'more', 'based', 'material', 'academic', 'notes', 'course', 'curriculum', 'please',
+        'know', 'learn', 'study', 'me', 'my', 'you', 'your', 'it', 'its', 'they', 'them', 'their'
+      ]);
+      const rawKeywords = message.trim().replace(/[^a-zA-Z0-9\s]/g, ' ').split(/\s+/)
+        .map(w => w.trim().toLowerCase())
+        .filter(w => w.length >= 3 && !stopWords.has(w));
+      const keywords = Array.from(new Set(rawKeywords)).slice(0, 5);
+
+      if (keywords.length > 0) {
+        const likeClauses = keywords.map(kw => {
+          ragParams.push(`%${kw}%`);
+          return `(mc.chunk_text ILIKE $${ragParams.length} OR m.title ILIKE $${ragParams.length} OR t.title ILIKE $${ragParams.length})`;
+        });
+        ragQuery += ` AND (${likeClauses.join(' OR ')})`;
+        ragQuery += ` ORDER BY mc.chunk_index ASC LIMIT 5`;
+
+        const ragRes = await db.query(ragQuery, ragParams);
+
+        if (ragRes.rowCount > 0) {
+          const ragTexts = [];
+          for (const chunk of ragRes.rows) {
+            ragTexts.push(`--- Course Material: ${chunk.material_title || chunk.file_name} (${chunk.subject_name || 'Subject'}) ---\n${chunk.chunk_text}`);
+
+            // Extract citation without fabricating page or slide numbers
+            const citationItem = extractCitationMetadata(chunk);
+
+            // Deduplicate citations
+            const alreadyExists = citations.some(c => 
+              c.material_title === citationItem.material_title && 
+              c.page_number === citationItem.page_number && 
+              c.slide_number === citationItem.slide_number &&
+              c.section_title === citationItem.section_title
+            );
+            if (!alreadyExists) {
+              citations.push(citationItem);
+            }
+          }
+
+          const joinedRag = ragTexts.join('\n\n');
+          contextText = contextText ? `${contextText}\n\n=== OFFICIAL COURSE MATERIAL ===\n${joinedRag}` : `=== OFFICIAL COURSE MATERIAL ===\n${joinedRag}`;
+          
+          // Grounding status: If strong academic match with matching keywords
+          grounding = determineGroundingStatus(citations, 0.85);
+        }
+      }
+    } catch (ragErr) {
+      console.warn('[AI Assistant] Curriculum RAG search warning:', ragErr.message);
+    }
+
+    // If partial or general
+    if (grounding === 'GENERAL' && contextText && contextText.trim() && citations.length > 0) {
+      grounding = 'PARTIAL';
+    }
+
     // Query classification & Freshness routing layer
     const queryClassification = classifyQuery(message.trim(), Boolean(contextText && contextText.trim()));
     if (queryClassification.isTimeSensitive) {
@@ -323,6 +432,16 @@ exports.sendMessage = async (req, res) => {
         const freshSources = await retrieveCurrentInformation(message.trim());
         const freshContextBlock = formatCurrentContextBlock(freshSources);
         contextText = contextText ? `${contextText}\n\n${freshContextBlock}` : freshContextBlock;
+        if (freshSources && freshSources.length > 0) {
+          freshSources.forEach(s => {
+            citations.push({
+              materialTitle: s.title || s.source,
+              fileType: 'WEB',
+              url: s.url,
+              sourceType: 'LIVE_WEB'
+            });
+          });
+        }
       } catch (freshErr) {
         console.warn('[AI Assistant] Freshness retrieval notice:', freshErr.message);
       }
@@ -346,7 +465,6 @@ exports.sendMessage = async (req, res) => {
         mimeType
       );
     } catch (aiErr) {
-      // If client disconnected during generation, suppress the error
       if (clientDisconnected) {
         console.log(`[AI][${chosenProvider}] Generation cancelled (client disconnected).`);
         return;
@@ -361,17 +479,16 @@ exports.sendMessage = async (req, res) => {
       return res.status(500).json({ success: false, message: userFriendlyMessage, error: aiErr.message });
     }
 
-    // If client disconnected after generation completed, skip saving incomplete state
     if (clientDisconnected) {
       console.log(`[AI][${chosenProvider}] Response generated but client disconnected — not saving assistant message.`);
       return;
     }
 
-    // Save assistant message to DB
+    // Save assistant message to DB with citations and grounding
     const assistantMsgRes = await db.query(
-      `INSERT INTO ai_messages (conversation_id, sender, content, provider) 
-       VALUES ($1, 'assistant', $2, $3) RETURNING *`,
-      [conversationId, assistantReply, chosenProvider]
+      `INSERT INTO ai_messages (conversation_id, sender, content, provider, citations, grounding) 
+       VALUES ($1, 'assistant', $2, $3, $4, $5) RETURNING *`,
+      [conversationId, assistantReply, chosenProvider, JSON.stringify(citations), grounding]
     );
 
     // Update message_id on attachment if relevant
@@ -419,4 +536,62 @@ exports.getProvidersStatus = async (req, res) => {
     res.status(500).json({ success: false, message: 'Failed to check AI providers status' });
   }
 };
+
+/**
+ * Extracts verified citation metadata from a material chunk without fabricating page/slide numbers
+ */
+function extractCitationMetadata(chunk) {
+  const chunkText = chunk.chunk_text || chunk.content || '';
+  const meta = chunk.metadata || {};
+
+  const citation = {
+    material_id: chunk.material_id || meta.material_id || null,
+    material_title: chunk.material_title || meta.material_title || chunk.file_name || 'Course Material',
+    file_type: chunk.file_type || meta.file_type || 'PDF',
+    subject_name: chunk.subject_name || meta.subject_name || null,
+    unit_name: chunk.unit_title || chunk.unit_name || meta.unit_name || null,
+    topic_title: chunk.topic_title || meta.topic_title || null,
+    page_number: meta.page_number || null,
+    slide_number: meta.slide_number || null,
+    section_title: meta.section_title || null,
+    excerpt: chunkText.substring(0, 160).trim()
+  };
+
+  // Check for real PPTX slide markers
+  const slideMatch = chunkText.match(/(?:--- Slide\s*(\d+) ---|Slide\s*(\d+)[:\s]*(.*?)(?:\n|$))/i);
+  if (slideMatch && !citation.slide_number) {
+    citation.slide_number = parseInt(slideMatch[1] || slideMatch[2], 10);
+    if (slideMatch[3] && slideMatch[3].trim() && !citation.section_title) {
+      citation.section_title = slideMatch[3].trim().replace(/^[:\-\s]+/, '');
+    }
+  }
+
+  // Check for real PDF page markers
+  const pageMatch = chunkText.match(/(?:--- Page\s*(\d+) ---|\[Page\s*(\d+)\]|page\s*:\s*(\d+)|\b--\s*(\d+)\s*of\s*\d+\s*--)/i);
+  if (pageMatch && !citation.page_number) {
+    citation.page_number = parseInt(pageMatch[1] || pageMatch[2] || pageMatch[3] || pageMatch[4], 10);
+  }
+
+  // Check for real DOCX section heading markers
+  const headingMatch = chunkText.match(/##\s+([^\n]+)/);
+  if (headingMatch && headingMatch[1] && !citation.section_title) {
+    citation.section_title = headingMatch[1].trim();
+  }
+
+  return citation;
+}
+
+/**
+ * Calculates transparent grounding status
+ */
+function determineGroundingStatus(citations, topSimilarity = 0) {
+  if (!citations || citations.length === 0) return 'GENERAL';
+  if (topSimilarity >= 0.75) return 'GROUNDED';
+  return 'PARTIAL';
+}
+
+exports.extractCitationMetadata = extractCitationMetadata;
+exports.determineGroundingStatus = determineGroundingStatus;
+
+
 

@@ -15,6 +15,9 @@ import QuizPage from './pages/QuizPage';
 import AttemptReviewPage from './pages/AttemptReviewPage';
 import AIAssistant from './pages/AIAssistant';
 import AILearning from './pages/AILearning';
+import CohortLearningGaps from './pages/CohortLearningGaps';
+import StudentResources from './pages/StudentResources';
+import ResourceApprovals from './pages/ResourceApprovals';
 import Layout from './components/layout/Layout';
 import ToastContainer from './components/Toast';
 
@@ -41,9 +44,12 @@ function App() {
           <Route path="settings" element={<Settings />} />
           <Route path="subjects" element={<Subjects />} />
           <Route path="subjects/:subjectId" element={<SubjectDetails />} />
+          <Route path="student-resources" element={<StudentResources />} />
+          <Route path="resource-approvals" element={<ResourceApprovals />} />
           <Route path="attempt-review/:attemptId" element={<AttemptReviewPage />} />
           <Route path="ai-assistant" element={<AIAssistant />} />
           <Route path="ai-learning" element={<AILearning />} />
+          <Route path="cohort-learning-gaps" element={<CohortLearningGaps />} />
         </Route>
         
         {/* Full-screen quiz page — outside Layout */}

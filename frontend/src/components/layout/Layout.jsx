@@ -1,8 +1,8 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { Outlet, useNavigate, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LogOut, BookOpen, Users, Settings, LayoutDashboard, BookText, Bot, Sparkles,
-  PanelLeftClose, PanelLeftOpen, Menu, X
+  PanelLeftClose, PanelLeftOpen, Menu, X, FolderHeart, CheckSquare, Search, AlertTriangle
 } from 'lucide-react';
 
 export default function Layout() {
@@ -50,17 +50,44 @@ export default function Layout() {
 
   const isFullScreen = currentPath === '/ai-assistant';
 
+  const [searchNavQuery, setSearchNavQuery] = useState('');
+  const [isSearchFocused, setIsSearchFocused] = useState(false);
+  const searchInputRef = useRef(null);
+
+  // Grouped Navigation Items with metadata for fast search
   const navLinks = [
     {
       to: getDashboardRoute(),
       label: 'Dashboard',
+      description: 'Overview, departmental metrics & approvals',
+      category: 'PAGES',
       icon: LayoutDashboard,
       show: true,
       active: currentPath === getDashboardRoute()
     },
     {
+      to: '/subjects',
+      label: 'Subjects',
+      description: 'Curriculum structure, units, lessons & materials',
+      category: 'ACADEMIC',
+      icon: BookText,
+      show: ['HOD', 'FACULTY', 'STUDENT'].includes(role),
+      active: currentPath === '/subjects'
+    },
+    {
+      to: '/student-resources',
+      label: 'Student Resources',
+      description: 'Shared peer notes & community study materials',
+      category: 'ACADEMIC',
+      icon: FolderHeart,
+      show: true,
+      active: currentPath === '/student-resources'
+    },
+    {
       to: '/ai-assistant',
       label: 'AI Assistant',
+      description: 'Ask questions and analyze academic materials with citations',
+      category: 'ACADEMIC',
       icon: Bot,
       show: true,
       active: currentPath === '/ai-assistant'
@@ -68,32 +95,80 @@ export default function Layout() {
     {
       to: '/ai-learning',
       label: 'AI Learning',
+      description: 'Personalized practice & prerequisite diagnosis',
+      category: 'ACADEMIC',
       icon: Sparkles,
       show: role === 'STUDENT',
       active: currentPath === '/ai-learning'
     },
     {
+      to: '/cohort-learning-gaps',
+      label: 'Cohort Learning Gaps',
+      description: 'Departmental gap diagnosis, topic weaknesses & remedial plans',
+      category: 'ACADEMIC',
+      icon: AlertTriangle,
+      show: ['HOD', 'FACULTY', 'INSTITUTE_ADMIN', 'SUPER_ADMIN'].includes(role),
+      active: currentPath === '/cohort-learning-gaps'
+    },
+    {
+      to: '/resource-approvals',
+      label: 'Resource Approvals',
+      description: 'Review and approve peer-submitted student notes',
+      category: 'ADMINISTRATION',
+      icon: CheckSquare,
+      show: ['FACULTY', 'HOD', 'INSTITUTE_ADMIN', 'SUPER_ADMIN'].includes(role),
+      active: currentPath === '/resource-approvals'
+    },
+    {
       to: '/users',
       label: 'Users & Roles',
+      description: 'Manage faculty, mentors and student accounts',
+      category: 'ADMINISTRATION',
       icon: Users,
       show: role !== 'STUDENT',
       active: currentPath === '/users'
     },
     {
-      to: '/subjects',
-      label: 'Subjects',
-      icon: BookText,
-      show: ['HOD', 'FACULTY', 'STUDENT'].includes(role),
-      active: currentPath === '/subjects'
-    },
-    {
       to: '/settings',
       label: 'Settings',
+      description: 'Profile settings & account preferences',
+      category: 'PAGES',
       icon: Settings,
       show: true,
       active: currentPath === '/settings'
     }
   ];
+
+  // Filtered Navigation based on Role and Search Query
+  const authorizedNavLinks = navLinks.filter(n => n.show);
+  const searchResults = searchNavQuery.trim()
+    ? authorizedNavLinks.filter(n =>
+        n.label.toLowerCase().includes(searchNavQuery.toLowerCase()) ||
+        n.description.toLowerCase().includes(searchNavQuery.toLowerCase()) ||
+        n.category.toLowerCase().includes(searchNavQuery.toLowerCase())
+      )
+    : authorizedNavLinks;
+
+  // Global Keyboard Shortcut: Ctrl+K or / to focus search
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        if (isSidebarCollapsed) setIsSidebarCollapsed(false);
+        searchInputRef.current?.focus();
+      } else if (e.key === '/' && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+        e.preventDefault();
+        if (isSidebarCollapsed) setIsSidebarCollapsed(false);
+        searchInputRef.current?.focus();
+      } else if (e.key === 'Escape' && document.activeElement === searchInputRef.current) {
+        setSearchNavQuery('');
+        searchInputRef.current?.blur();
+        setIsSearchFocused(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isSidebarCollapsed]);
 
   return (
     <div className="flex h-screen bg-[#f4f6fc] selection:bg-indigo-100 selection:text-indigo-900 overflow-hidden relative font-sans">
@@ -145,25 +220,59 @@ export default function Layout() {
           </button>
         </div>
 
-        <nav className="flex-1 p-4 space-y-2 overflow-y-auto">
-          {navLinks.filter(n => n.show).map((item, idx) => {
-            const Icon = item.icon;
-            return (
-              <Link
-                key={idx}
-                to={item.to}
-                onClick={() => setIsMobileNavOpen(false)}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm border ${
-                  item.active
-                    ? 'text-indigo-700 bg-indigo-50/90 font-bold border-indigo-100'
-                    : 'text-slate-600 hover:text-indigo-700 hover:bg-slate-50 border-transparent'
-                }`}
+        {/* Mobile Navigation Search */}
+        <div className="p-4 border-b border-indigo-50/80">
+          <div className="relative">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              value={searchNavQuery}
+              onChange={(e) => setSearchNavQuery(e.target.value)}
+              placeholder="Search pages..."
+              className="w-full bg-slate-50 border border-slate-200/80 rounded-xl pl-9 pr-3 py-2 text-xs text-slate-700 outline-none focus:ring-2 focus:ring-indigo-500"
+            />
+            {searchNavQuery && (
+              <button
+                onClick={() => setSearchNavQuery('')}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
               >
-                <Icon className={`w-5 h-5 ${item.active ? 'text-indigo-600' : 'text-slate-400'}`} />
-                {item.label}
-              </Link>
-            );
-          })}
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+        </div>
+
+        <nav className="flex-1 p-4 space-y-1.5 overflow-y-auto custom-scrollbar">
+          {searchResults.length === 0 ? (
+            <p className="text-xs text-slate-400 text-center py-6">No matching pages found.</p>
+          ) : (
+            searchResults.map((item, idx) => {
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={idx}
+                  to={item.to}
+                  onClick={() => {
+                    setIsMobileNavOpen(false);
+                    setSearchNavQuery('');
+                  }}
+                  className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-all font-medium text-sm border ${
+                    item.active
+                      ? 'text-indigo-700 bg-indigo-50/90 font-bold border-indigo-100'
+                      : 'text-slate-600 hover:text-indigo-700 hover:bg-slate-50 border-transparent'
+                  }`}
+                >
+                  <Icon className={`w-5 h-5 ${item.active ? 'text-indigo-600' : 'text-slate-400'}`} />
+                  <div className="min-w-0">
+                    <p className="truncate">{item.label}</p>
+                    {searchNavQuery && (
+                      <p className="text-[10px] text-slate-400 font-normal truncate">{item.description}</p>
+                    )}
+                  </div>
+                </Link>
+              );
+            })
+          )}
         </nav>
 
         <div className="p-4 border-t border-indigo-50">
@@ -209,43 +318,115 @@ export default function Layout() {
             )}
           </button>
         </div>
+
+        {/* Global Navigation Search Bar */}
+        {!isSidebarCollapsed ? (
+          <div className="px-5 pt-4 pb-1">
+            <div className="relative group">
+              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 group-focus-within:text-indigo-600 transition-colors" />
+              <input
+                ref={searchInputRef}
+                type="text"
+                value={searchNavQuery}
+                onFocus={() => setIsSearchFocused(true)}
+                onBlur={() => setTimeout(() => setIsSearchFocused(false), 200)}
+                onChange={(e) => setSearchNavQuery(e.target.value)}
+                placeholder="Search pages..."
+                className="w-full bg-slate-50/80 hover:bg-slate-100/80 focus:bg-white border border-slate-200/80 focus:border-indigo-300 rounded-xl pl-8 pr-12 py-2 text-xs text-slate-800 placeholder-slate-400 outline-none focus:ring-2 focus:ring-indigo-500/10 transition-all"
+              />
+              <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                {searchNavQuery ? (
+                  <button
+                    type="button"
+                    onClick={() => setSearchNavQuery('')}
+                    className="text-slate-400 hover:text-slate-600 p-0.5"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                ) : (
+                  <kbd className="hidden sm:inline-block px-1.5 py-0.5 text-[9px] font-bold text-slate-400 bg-white border border-slate-200 rounded shadow-2xs">
+                    ⌘K
+                  </kbd>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : (
+          <div className="p-2 flex justify-center">
+            <button
+              onClick={() => {
+                setIsSidebarCollapsed(false);
+                setTimeout(() => searchInputRef.current?.focus(), 100);
+              }}
+              className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-slate-100 rounded-xl transition-all"
+              title="Search pages (Ctrl+K)"
+            >
+              <Search className="w-4 h-4" />
+            </button>
+          </div>
+        )}
         
         {/* Nav Links */}
-        <nav className={`flex-1 overflow-y-auto space-y-2 custom-scrollbar transition-all ${
-          isSidebarCollapsed ? 'p-3 flex flex-col items-center' : 'p-6'
+        <nav className={`flex-1 overflow-y-auto space-y-1.5 custom-scrollbar transition-all ${
+          isSidebarCollapsed ? 'p-3 flex flex-col items-center' : 'p-5'
         }`}>
           {!isSidebarCollapsed && (
-            <div className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 ml-2">Menu</div>
+            <div className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2 ml-2 flex items-center justify-between">
+              <span>{searchNavQuery ? `Search Results (${searchResults.length})` : 'Menu'}</span>
+              {searchNavQuery && (
+                <button
+                  type="button"
+                  onClick={() => setSearchNavQuery('')}
+                  className="text-indigo-600 hover:underline normal-case text-[10px]"
+                >
+                  Clear
+                </button>
+              )}
+            </div>
           )}
-          
-          {navLinks.filter(n => n.show).map((item, idx) => {
-            const Icon = item.icon;
-            return (
-              <Link 
-                key={idx}
-                to={item.to}
-                className={`flex items-center rounded-xl transition-all group border ${
-                  isSidebarCollapsed 
-                    ? 'justify-center p-3 w-12 h-12' 
-                    : 'gap-3 px-4 py-3.5 w-full'
-                } ${
-                  item.active 
-                    ? 'text-indigo-700 bg-indigo-50/90 font-semibold shadow-xs border-indigo-150/70' 
-                    : 'text-slate-600 hover:text-indigo-700 hover:bg-white/80 font-medium hover:shadow-xs border-transparent hover:border-slate-100'
-                }`}
-                title={isSidebarCollapsed ? item.label : undefined}
-              >
-                <Icon className={`w-5 h-5 transition-transform duration-300 shrink-0 ${
-                  item.active 
-                    ? 'text-indigo-600 scale-110' 
-                    : 'text-slate-400 group-hover:text-indigo-500 group-hover:scale-110'
-                }`} />
-                {!isSidebarCollapsed && (
-                  <span className="truncate">{item.label}</span>
-                )}
-              </Link>
-            );
-          })}
+
+          {searchResults.length === 0 ? (
+            <div className="p-4 text-center text-xs text-slate-400">
+              No accessible pages match "{searchNavQuery}".
+            </div>
+          ) : (
+            searchResults.map((item, idx) => {
+              const Icon = item.icon;
+              return (
+                <Link 
+                  key={idx}
+                  to={item.to}
+                  onClick={() => setSearchNavQuery('')}
+                  className={`flex items-center rounded-xl transition-all group border ${
+                    isSidebarCollapsed 
+                      ? 'justify-center p-3 w-12 h-12' 
+                      : 'gap-3 px-3.5 py-2.5 w-full'
+                  } ${
+                    item.active 
+                      ? 'text-indigo-700 bg-indigo-50/90 font-semibold shadow-xs border-indigo-150/70' 
+                      : 'text-slate-600 hover:text-indigo-700 hover:bg-white/80 font-medium hover:shadow-xs border-transparent hover:border-slate-100'
+                  }`}
+                  title={isSidebarCollapsed ? item.label : undefined}
+                >
+                  <Icon className={`w-4 h-4 transition-transform duration-300 shrink-0 ${
+                    item.active 
+                      ? 'text-indigo-600 scale-110' 
+                      : 'text-slate-400 group-hover:text-indigo-500 group-hover:scale-110'
+                  }`} />
+                  {!isSidebarCollapsed && (
+                    <div className="min-w-0">
+                      <span className="truncate text-xs font-bold block">{item.label}</span>
+                      {searchNavQuery && (
+                        <span className="text-[10px] text-slate-400 font-normal truncate block leading-tight">
+                          {item.description}
+                        </span>
+                      )}
+                    </div>
+                  )}
+                </Link>
+              );
+            })
+          )}
         </nav>
 
         {/* Footer Logout */}

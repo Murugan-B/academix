@@ -22,20 +22,23 @@ const generateAiSummary = async (resourceId, fileUrl) => {
       throw new Error("No text extracted from PDF");
     }
 
+    const generateWithFallback = async (contents) => {
+      const candidates = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+      for (const m of candidates) {
+        try {
+          return await ai.models.generateContent({ model: m, contents });
+        } catch (e) {
+          console.warn(`[aiHelpers] Model ${m} failed: ${e.message}`);
+        }
+      }
+      throw new Error('All candidate models failed in aiHelpers');
+    };
+
     // 3. Generate Summary, Quiz, and Flashcards concurrently with Gemini
     const [summaryRes, quizRes, flashcardsRes] = await Promise.all([
-      ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: `Summarize this academic document concisely in a few paragraphs:\n\n${extractedText}`,
-      }),
-      ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: `Create a 3-question multiple choice quiz from this text. Output ONLY valid JSON in this exact format: [{"q": "Question?", "options": ["A", "B", "C", "D"], "a": "A"}]. Text:\n\n${extractedText}`,
-      }),
-      ai.models.generateContent({
-        model: 'gemini-2.5-flash',
-        contents: `Create 3 flashcards from this text for studying. Output ONLY valid JSON in this exact format: [{"front": "Concept", "back": "Definition"}]. Text:\n\n${extractedText}`,
-      })
+      generateWithFallback(`Summarize this academic document concisely in a few paragraphs:\n\n${extractedText}`),
+      generateWithFallback(`Create a 3-question multiple choice quiz from this text. Output ONLY valid JSON in this exact format: [{"q": "Question?", "options": ["A", "B", "C", "D"], "a": "A"}]. Text:\n\n${extractedText}`),
+      generateWithFallback(`Create 3 flashcards from this text for studying. Output ONLY valid JSON in this exact format: [{"front": "Concept", "back": "Definition"}]. Text:\n\n${extractedText}`)
     ]);
 
     const summary = summaryRes.text;

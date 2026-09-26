@@ -158,12 +158,58 @@ exports.getStudentWeakTopics = async (req, res) => {
           unanswered: parseInt(row.attempt_unanswered || 0),
           totalQuestions: totalQ,
           status: isPassed ? 'PASSED' : 'FAILED',
-          completedAt: row.completed_at
+          completedAt: row.completed_at,
+          topicsMap: {} // tag -> topic breakdown for THIS attempt
         };
       }
 
-      // Track Topic Performance under this Assessment
+      // Track Topic Performance under THIS specific attempt
+      const attObj = quizObj.attemptsMap[attId];
       const tag = row.topic_tag || 'General';
+      if (!attObj.topicsMap[tag]) {
+        attObj.topicsMap[tag] = {
+          topicTag: tag,
+          topicTitle: row.topic_title || tag,
+          materialId: row.material_id,
+          materialTitle: row.material_title,
+          unitTitle: row.unit_title,
+          unitNumber: row.unit_number,
+          lessonTitle: row.lesson_title,
+          subjectName: subName,
+          subjectCode: subCode,
+          quizId: qId,
+          quizTitle: quizObj.quizTitle,
+          attemptId: attId,
+          attemptNumber: row.attempt_number,
+          completedAt: row.completed_at,
+          totalQuestions: 0,
+          correctAnswers: 0,
+          wrongAnswers: 0,
+          wrongQuestions: []
+        };
+      }
+
+      const attTopicObj = attObj.topicsMap[tag];
+      attTopicObj.totalQuestions++;
+      if (row.is_correct) {
+        attTopicObj.correctAnswers++;
+      } else {
+        attTopicObj.wrongAnswers++;
+        const opts = { A: row.option_a, B: row.option_b, C: row.option_c, D: row.option_d };
+        attTopicObj.wrongQuestions.push({
+          questionId: row.question_id,
+          question: row.question,
+          selected_answer: row.selected_answer,
+          selected_answer_text: row.selected_answer ? opts[row.selected_answer] || null : 'Not Answered',
+          correct_answer: row.correct_answer,
+          correct_answer_text: opts[row.correct_answer] || null,
+          explanation: (row.explanation && row.explanation.trim()) ? row.explanation.trim() : null,
+          attemptNumber: row.attempt_number,
+          completedAt: row.completed_at
+        });
+      }
+
+      // Track Cumulative Topic Performance under this Assessment (for cross-attempt history)
       if (!quizObj.topicsMap[tag]) {
         quizObj.topicsMap[tag] = {
           topicTag: tag,
@@ -325,14 +371,61 @@ exports.getStudentWeakTopics = async (req, res) => {
       const assessments = Object.values(sub.quizzesMap).map(quiz => {
         const attempts = Object.values(quiz.attemptsMap).sort(
           (a, b) => new Date(a.completedAt) - new Date(b.completedAt)
-        );
+        ).map(att => {
+          const attemptTopics = Object.values(att.topicsMap || {}).map(t => {
+            const accuracy = t.totalQuestions > 0 ? Math.round((t.correctAnswers / t.totalQuestions) * 100) : 0;
+            const needsPractice = accuracy < 100 || t.wrongAnswers > 0;
+            return {
+              topicTag: t.topicTag,
+              topicTitle: t.topicTitle,
+              materialId: t.materialId,
+              materialTitle: t.materialTitle,
+              unitTitle: t.unitTitle,
+              unitNumber: t.unitNumber,
+              lessonTitle: t.lessonTitle,
+              subjectName: t.subjectName,
+              subjectCode: t.subjectCode,
+              quizId: t.quizId,
+              quizTitle: t.quizTitle,
+              attemptId: t.attemptId,
+              attemptNumber: t.attemptNumber,
+              completedAt: t.completedAt,
+              totalQuestions: t.totalQuestions,
+              correctAnswers: t.correctAnswers,
+              wrongAnswers: t.wrongAnswers,
+              accuracy,
+              needsPractice,
+              status: needsPractice ? 'NEEDS_PRACTICE' : 'STRONG_MASTERY',
+              wrongQuestions: t.wrongQuestions || []
+            };
+          }).sort((a, b) => {
+            if (a.needsPractice !== b.needsPractice) return a.needsPractice ? -1 : 1;
+            return a.accuracy - b.accuracy;
+          });
+
+          return {
+            attemptId: att.attemptId,
+            attemptNumber: att.attemptNumber,
+            score: att.score,
+            percentage: att.percentage,
+            accuracy: att.accuracy,
+            correctAnswers: att.correctAnswers,
+            wrongAnswers: att.wrongAnswers,
+            unanswered: att.unanswered,
+            totalQuestions: att.totalQuestions,
+            status: att.status,
+            completedAt: att.completedAt,
+            topics: attemptTopics
+          };
+        });
+
         const attemptsCount = attempts.length;
         const firstAttempt = attempts[0] || {};
         const latestAttempt = attempts[attempts.length - 1] || {};
         const bestScore = Math.max(...attempts.map(a => a.percentage), 0);
         const passedAttempt = attempts.find(a => a.status === 'PASSED' || a.percentage >= 60);
 
-        // Classify all topics inside this assessment
+        // Classify all topics inside this assessment (cumulative view)
         const topics = Object.values(quiz.topicsMap)
           .map(t => classifyAndEnrichTopic(t))
           .sort((a, b) => {
@@ -430,10 +523,22 @@ exports.getStudentWeakTopics = async (req, res) => {
         return a.overallAccuracy - b.overallAccuracy;
       });
 
-    const recentWeakTopics = classifiedGlobalTopics.filter(t => t.category === 'RECENT_FAILURE');
-    const improvingTopics = classifiedGlobalTopics.filter(t => t.category === 'IMPROVING');
-    const strongTopics = classifiedGlobalTopics.filter(t => t.category === 'STRONG');
-    const overallMastery = totalQuestionsAnswered > 0 ? Math.round((totalCorrectAnswers / totalQuestionsAnswered) * 100) : 0;
+    const recentWeakTopics = classifiedGlobalTopics
+      .filter(t => t.category === 'RECENT_FAILURE')
+      .sort((a, b) => a.latestAccuracy - b.latestAccuracy);
+
+    const improvingTopics = classifiedGlobalTopics
+      .filter(t => t.category === 'IMPROVING')
+      .sort((a, b) => (b.latestAccuracy - b.firstAccuracy) - (a.latestAccuracy - a.firstAccuracy));
+
+    const strongTopics = classifiedGlobalTopics
+      .filter(t => t.category === 'STRONG')
+      .sort((a, b) => b.overallAccuracy - a.overallAccuracy);
+
+    // 7. Calculate overall mastery percentage across all answered questions
+    const overallMastery = totalQuestionsAnswered > 0
+      ? Math.round((totalCorrectAnswers / totalQuestionsAnswered) * 100)
+      : 0;
 
     res.json({
       subjects,
@@ -464,7 +569,7 @@ exports.getStudentWeakTopics = async (req, res) => {
  */
 exports.generateLearningContent = async (req, res) => {
   const studentId = req.user.id;
-  const { topicTag, materialId, provider = 'gemini', forceRefresh = false } = req.body;
+  const { topicTag, materialId, attemptId, provider = 'gemini', forceRefresh = false } = req.body;
 
   if (!topicTag) {
     return res.status(400).json({ error: 'topicTag is required.' });
@@ -520,15 +625,30 @@ exports.generateLearningContent = async (req, res) => {
     }
 
     // 4. Fetch wrong questions student answered for this topic
-    const wrongQuestionsRes = await db.query(`
-      SELECT qq.question, qaa.selected_answer, qq.correct_answer, qq.explanation
-      FROM quiz_attempt_answers qaa
-      JOIN quiz_questions qq ON qaa.question_id = qq.id
-      JOIN quiz_attempts qa ON qaa.attempt_id = qa.id
-      WHERE qa.student_id = $1 AND qq.topic_tag = $2 AND qaa.is_correct = false
-      ORDER BY qa.completed_at DESC
-      LIMIT 5
-    `, [studentId, topicTag]);
+    let wrongQuestions = [];
+    if (attemptId) {
+      const attemptWrongRes = await db.query(`
+        SELECT qq.question, qaa.selected_answer, qq.correct_answer, qq.explanation
+        FROM quiz_attempt_answers qaa
+        JOIN quiz_questions qq ON qaa.question_id = qq.id
+        WHERE qaa.attempt_id = $1 AND qq.topic_tag = $2 AND qaa.is_correct = false
+        LIMIT 6
+      `, [attemptId, topicTag]);
+      wrongQuestions = attemptWrongRes.rows;
+    }
+
+    if (wrongQuestions.length === 0) {
+      const generalWrongRes = await db.query(`
+        SELECT qq.question, qaa.selected_answer, qq.correct_answer, qq.explanation
+        FROM quiz_attempt_answers qaa
+        JOIN quiz_questions qq ON qaa.question_id = qq.id
+        JOIN quiz_attempts qa ON qaa.attempt_id = qa.id
+        WHERE qa.student_id = $1 AND qq.topic_tag = $2 AND qaa.is_correct = false
+        ORDER BY qa.completed_at DESC
+        LIMIT 6
+      `, [studentId, topicTag]);
+      wrongQuestions = generalWrongRes.rows;
+    }
 
     // 5. Generate learning content via AI Provider
     console.log(`[AI LEARNING] Calling provider "${provider}" for topic "${topicTag}"`);
@@ -536,7 +656,7 @@ exports.generateLearningContent = async (req, res) => {
       provider,
       topicTag,
       extractedText,
-      wrongQuestionsRes.rows,
+      wrongQuestions,
       { fileType: fileType || material.file_type, title: material.title }
     );
 

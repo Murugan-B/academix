@@ -5,7 +5,76 @@ class GeminiProvider extends AIProvider {
   constructor() {
     super();
     this.ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    this.modelName = 'gemini-2.5-flash';
+    this.candidateModels = [
+      'gemini-2.5-flash',
+      'gemini-3.5-flash',
+      'gemini-3.6-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.8-flash'
+    ];
+    this.modelName = this.candidateModels[0];
+  }
+
+  /**
+   * Helper to execute Gemini generation with automatic multi-model fallback on 503/429/UNAVAILABLE spikes.
+   */
+  async _generateContentWithFallback(requestParams) {
+    if (!process.env.GEMINI_API_KEY) {
+      throw new Error('Gemini API key is not configured in backend environment.');
+    }
+
+    let lastError = null;
+
+    for (let i = 0; i < this.candidateModels.length; i++) {
+      const model = this.candidateModels[i];
+      try {
+        const response = await this.ai.models.generateContent({
+          model,
+          ...requestParams
+        });
+        return response;
+      } catch (error) {
+        lastError = error;
+        const msg = error?.message || String(error);
+        const isTransient = msg.includes('503') ||
+          msg.includes('high demand') ||
+          msg.includes('UNAVAILABLE') ||
+          msg.includes('429') ||
+          msg.includes('RESOURCE_EXHAUSTED') ||
+          msg.includes('404') ||
+          msg.includes('NOT_FOUND');
+
+        console.warn(`[Gemini Provider] Model "${model}" failed (attempt ${i + 1}/${this.candidateModels.length}): ${msg}`);
+
+        if (isTransient && i < this.candidateModels.length - 1) {
+          const nextModel = this.candidateModels[i + 1];
+          console.log(`[Gemini Provider] Automatically falling back to candidate model "${nextModel}"...`);
+          // Brief pause before trying next candidate
+          await new Promise(resolve => setTimeout(resolve, 600));
+          continue;
+        }
+
+        // If not a retryable error or last model exhausted
+        if (!isTransient) {
+          throw error;
+        }
+      }
+    }
+
+    throw lastError || new Error('All Gemini candidate models failed to generate content.');
+  }
+
+  /**
+   * Helper to safely parse JSON from model output
+   */
+  _cleanAndParseJson(text) {
+    const raw = (text || '').trim();
+    const cleaned = raw
+      .replace(/^```json\s*/i, '')
+      .replace(/^```\s*/i, '')
+      .replace(/\s*```$/i, '')
+      .trim();
+    return JSON.parse(cleaned);
   }
 
   async summarizeContent(text) {
@@ -32,9 +101,8 @@ Material Content:
 ${text}`;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: this.modelName,
-        contents: prompt,
+      const response = await this._generateContentWithFallback({
+        contents: prompt
       });
       return response.text;
     } catch (error) {
@@ -47,9 +115,8 @@ ${text}`;
     const prompt = `You are an academic learning assistant. Answer the user's question based ONLY on the provided material content below. If the answer is not available in the material, respond honestly: "I couldn't find this information in the selected material." Do not confidently invent an answer or hallucinate.\n\nMaterial Content:\n${text}\n\nUser Question:\n${question}`;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: this.modelName,
-        contents: prompt,
+      const response = await this._generateContentWithFallback({
+        contents: prompt
       });
       return response.text;
     } catch (error) {
@@ -79,15 +146,11 @@ Material Content:
 ${text}`;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: this.modelName,
+      const response = await this._generateContentWithFallback({
         contents: prompt,
-        config: { responseMimeType: 'application/json' },
+        config: { responseMimeType: 'application/json' }
       });
-      const raw = response.text.trim();
-      // Strip any accidental markdown fences
-      const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
-      return JSON.parse(cleaned);
+      return this._cleanAndParseJson(response.text);
     } catch (error) {
       console.error('Gemini generateQuiz error:', error);
       throw new Error('Failed to generate quiz. Please try again.');
@@ -119,14 +182,11 @@ Material Content:
 ${text}`;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: this.modelName,
+      const response = await this._generateContentWithFallback({
         contents: prompt,
-        config: { responseMimeType: 'application/json' },
+        config: { responseMimeType: 'application/json' }
       });
-      const raw = response.text.trim();
-      const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
-      return JSON.parse(cleaned);
+      return this._cleanAndParseJson(response.text);
     } catch (error) {
       console.error('Gemini generateMoreQuestions error:', error);
       throw new Error('Failed to generate additional questions. Please try again.');
@@ -150,9 +210,8 @@ Write a short, encouraging, and personalized 3-4 sentence recommendation for thi
 Be direct, specific, and encouraging. Do not use generic phrases like "keep it up" without context.`;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: this.modelName,
-        contents: prompt,
+      const response = await this._generateContentWithFallback({
+        contents: prompt
       });
       return response.text;
     } catch (error) {
@@ -162,10 +221,6 @@ Be direct, specific, and encouraging. Do not use generic phrases like "keep it u
   }
 
   async generateChatResponse(history, question, contextText = '', imageBuffer = null, mimeType = 'image/png') {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error('Gemini API key is not configured in backend environment.');
-    }
-
     let systemInstruction = `You are Academix AI Assistant, an expert academic tutor and study partner. Provide helpful, accurate, structured Markdown responses.`;
     
     let contextBlock = '';
@@ -195,9 +250,8 @@ Be direct, specific, and encouraging. Do not use generic phrases like "keep it u
         ];
       }
 
-      const response = await this.ai.models.generateContent({
-        model: this.modelName,
-        contents: contentsPayload,
+      const response = await this._generateContentWithFallback({
+        contents: contentsPayload
       });
       return response.text.trim();
     } catch (error) {
@@ -207,10 +261,6 @@ Be direct, specific, and encouraging. Do not use generic phrases like "keep it u
   }
 
   async generateLearningContent(topic, materialText, wrongQuestions = [], meta = {}) {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error('Gemini API key is not configured in backend environment.');
-    }
-
     let wrongQuestionsBlock = '';
     if (wrongQuestions && wrongQuestions.length > 0) {
       wrongQuestionsBlock = `\nSTUDENT'S PREVIOUS INCORRECT QUESTIONS IN THIS TOPIC:\n` +
@@ -306,14 +356,11 @@ STRICT JSON STRUCTURE REQUIRED:
 }`;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: this.modelName,
+      const response = await this._generateContentWithFallback({
         contents: prompt,
-        config: { responseMimeType: 'application/json' },
+        config: { responseMimeType: 'application/json' }
       });
-      const raw = response.text.trim();
-      const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
-      return JSON.parse(cleaned);
+      return this._cleanAndParseJson(response.text);
     } catch (error) {
       console.error('Gemini generateLearningContent error:', error);
       throw new Error(`Failed to generate personalized learning content: ${error.message}`);
@@ -321,10 +368,6 @@ STRICT JSON STRUCTURE REQUIRED:
   }
 
   async generateFlashcards(topic, materialText) {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error('Gemini API key is not configured in backend environment.');
-    }
-
     const prompt = `You are Academix AI. Generate 8-10 high-yield academic study flashcards for the topic "${topic}" based on this material:
 ${materialText}
 
@@ -340,14 +383,11 @@ Return ONLY a JSON array of objects matching this schema:
 ]`;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: this.modelName,
+      const response = await this._generateContentWithFallback({
         contents: prompt,
-        config: { responseMimeType: 'application/json' },
+        config: { responseMimeType: 'application/json' }
       });
-      const raw = response.text.trim();
-      const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
-      return JSON.parse(cleaned);
+      return this._cleanAndParseJson(response.text);
     } catch (error) {
       console.error('Gemini generateFlashcards error:', error);
       throw new Error(`Failed to generate flashcards: ${error.message}`);
@@ -355,10 +395,6 @@ Return ONLY a JSON array of objects matching this schema:
   }
 
   async generateStudyPlan(studentProfile, weakTopics = [], strongTopics = []) {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error('Gemini API key is not configured in backend environment.');
-    }
-
     const prompt = `You are an expert AI Academic Study Planner. Create an actionable, structured study plan tailored to the student.
 Student Profile: ${JSON.stringify(studentProfile)}
 Weak Topics to Prioritize: ${JSON.stringify(weakTopics)}
@@ -390,14 +426,11 @@ Return ONLY a JSON object:
 }`;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: this.modelName,
+      const response = await this._generateContentWithFallback({
         contents: prompt,
-        config: { responseMimeType: 'application/json' },
+        config: { responseMimeType: 'application/json' }
       });
-      const raw = response.text.trim();
-      const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
-      return JSON.parse(cleaned);
+      return this._cleanAndParseJson(response.text);
     } catch (error) {
       console.error('Gemini generateStudyPlan error:', error);
       throw new Error(`Failed to generate study plan: ${error.message}`);
@@ -405,10 +438,6 @@ Return ONLY a JSON object:
   }
 
   async generateSmartRevision(topic, materialText, wrongQuestions = []) {
-    if (!process.env.GEMINI_API_KEY) {
-      throw new Error('Gemini API key is not configured in backend environment.');
-    }
-
     let wrongQuestionsBlock = '';
     if (wrongQuestions && wrongQuestions.length > 0) {
       wrongQuestionsBlock = `Student's previous missed questions:\n` +
@@ -438,14 +467,11 @@ Return ONLY a JSON object:
 }`;
 
     try {
-      const response = await this.ai.models.generateContent({
-        model: this.modelName,
+      const response = await this._generateContentWithFallback({
         contents: prompt,
-        config: { responseMimeType: 'application/json' },
+        config: { responseMimeType: 'application/json' }
       });
-      const raw = response.text.trim();
-      const cleaned = raw.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/\s*```$/i, '');
-      return JSON.parse(cleaned);
+      return this._cleanAndParseJson(response.text);
     } catch (error) {
       console.error('Gemini generateSmartRevision error:', error);
       throw new Error(`Failed to generate revision cheat sheet: ${error.message}`);
@@ -454,4 +480,3 @@ Return ONLY a JSON object:
 }
 
 module.exports = GeminiProvider;
-

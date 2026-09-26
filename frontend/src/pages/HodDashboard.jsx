@@ -4,6 +4,7 @@ import api from '../api/axios';
 import NotificationPanel from '../components/NotificationPanel';
 import CreateNotification from '../components/CreateNotification';
 import AddHierarchyModal from '../components/AddHierarchyModal';
+import CohortSummaryCard from '../components/CohortSummaryCard';
 
 export default function HodDashboard() {
   const [showModal, setShowModal] = useState(false);
@@ -114,6 +115,11 @@ export default function HodDashboard() {
         <div>
           <NotificationPanel />
         </div>
+      </div>
+
+      {/* Cohort Learning Gap Intelligence Summary */}
+      <div className="mb-8">
+        <CohortSummaryCard />
       </div>
 
       {/* Add Faculty Modal */}

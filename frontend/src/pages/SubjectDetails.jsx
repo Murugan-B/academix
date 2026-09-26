@@ -1,11 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronRight, ChevronDown, Plus, Trash2, FileText, Download, UploadCloud, ArrowLeft, BookOpen, AlertCircle, Search, Sparkles, MessageSquare, CheckCircle, BrainCircuit } from 'lucide-react';
+import { ChevronRight, ChevronDown, Plus, Trash2, FileText, Download, UploadCloud, ArrowLeft, BookOpen, AlertCircle, Search, Sparkles, MessageSquare, CheckCircle, BrainCircuit, Network, Layers, BarChart3 } from 'lucide-react';
 import api from '../api/axios';
 import UploadMaterialModal from '../components/UploadMaterialModal';
 import AddHierarchyModal from '../components/AddHierarchyModal';
 import AISummaryPanel from '../components/AISummaryPanel';
 import AIChatbotPanel from '../components/AIChatbotPanel';
+import SyllabusCoveragePanel from '../components/SyllabusCoveragePanel';
+import KnowledgeGraphPanel from '../components/KnowledgeGraphPanel';
 
 function MaterialViewer({ material, onDownload, onOpenSummary, onOpenChat, onOpenQuiz }) {
   const [blobUrl, setBlobUrl] = useState(null);
@@ -425,29 +427,33 @@ function TopicItem({ topic, lessonNumber, role, isHod, isFaculty, fetchTopics, s
   return (
     <div className="border-t border-slate-100/50">
       <div 
-        className={`py-2 px-4 flex items-center justify-between cursor-pointer hover:bg-slate-50 transition-colors ${isMatch ? 'bg-indigo-50/30' : ''}`}
+        className={`py-2 px-3.5 flex items-center justify-between gap-2 cursor-pointer hover:bg-slate-50 transition-colors ${isMatch ? 'bg-indigo-50/30' : ''}`}
         onClick={() => setExpanded(!expanded)}
       >
-        <div className="flex items-center gap-2">
-          {expanded ? <ChevronDown className="w-3.5 h-3.5 text-slate-400" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400" />}
-          <span className="text-xs font-bold text-slate-400 w-6 shrink-0">{lessonNumber}.{topic.topic_number}</span>
-          <span className="text-sm font-semibold text-slate-700 truncate max-w-[160px]">{topic.title}</span>
+        <div className="flex items-center gap-1.5 min-w-0 flex-1 mr-1">
+          {expanded ? <ChevronDown className="w-3.5 h-3.5 text-slate-400 shrink-0" /> : <ChevronRight className="w-3.5 h-3.5 text-slate-400 shrink-0" />}
+          <span className="text-xs font-bold text-slate-400 shrink-0">{lessonNumber}.{topic.topic_number}</span>
+          <span className="text-xs font-semibold text-slate-700 truncate" title={topic.title}>{topic.title}</span>
         </div>
         
-        <div className="flex items-center gap-2 transition-opacity">
+        <div className="flex items-center gap-1.5 shrink-0">
           {(isHod || isFaculty) && expanded && (
             <button 
               onClick={(e) => { e.stopPropagation(); setShowUpload(true); }}
-              className="flex items-center gap-1.5 px-2 py-1 text-xs font-bold bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-colors"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-colors whitespace-nowrap shrink-0 border border-indigo-100/60 shadow-2xs"
               title="Add Material"
             >
-              <Plus className="w-3.5 h-3.5" />
-              Add Material
+              <Plus className="w-3.5 h-3.5 shrink-0" />
+              <span>Add Material</span>
             </button>
           )}
           {isHod && (
-            <button onClick={handleDelete} className="p-1 text-slate-400 hover:text-rose-500 rounded">
-              <Trash2 className="w-3 h-3" />
+            <button 
+              onClick={handleDelete} 
+              className="p-1 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors shrink-0"
+              title="Delete Topic"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
             </button>
           )}
         </div>
@@ -531,28 +537,32 @@ function LessonItem({ lesson, role, isHod, isFaculty, fetchLessons, showToastMes
   return (
     <div className="border-t border-slate-200">
       <div 
-        className={`group py-3 px-3 flex items-center justify-between cursor-pointer hover:bg-slate-100 transition-colors ${isMatch ? 'bg-indigo-50/50' : ''}`}
+        className={`group py-2.5 px-3.5 flex items-center justify-between gap-2 cursor-pointer hover:bg-slate-100 transition-colors ${isMatch ? 'bg-indigo-50/50' : ''}`}
         onClick={() => setExpanded(!expanded)}
       >
-        <div className="flex items-center gap-2">
-          {expanded ? <ChevronDown className="w-4 h-4 text-indigo-400" /> : <ChevronRight className="w-4 h-4 text-indigo-400" />}
-          <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider">L{lesson.lesson_number}</span>
-          <span className="text-sm font-bold text-slate-800 truncate max-w-[150px]">{lesson.title}</span>
+        <div className="flex items-center gap-2 min-w-0 flex-1 mr-1">
+          {expanded ? <ChevronDown className="w-4 h-4 text-indigo-400 shrink-0" /> : <ChevronRight className="w-4 h-4 text-indigo-400 shrink-0" />}
+          <span className="text-xs font-bold text-indigo-500 uppercase tracking-wider shrink-0">L{lesson.lesson_number}</span>
+          <span className="text-sm font-bold text-slate-800 truncate" title={lesson.title}>{lesson.title}</span>
         </div>
         
-        <div className="flex items-center gap-2 transition-opacity">
+        <div className="flex items-center gap-1.5 shrink-0">
            {(isHod || isFaculty) && expanded && (
             <button 
               onClick={handleAddTopicClick} 
-              className="flex items-center gap-1.5 px-2 py-1 text-xs font-bold bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-colors"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 text-xs font-bold bg-indigo-50 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-colors whitespace-nowrap shrink-0 border border-indigo-100/60 shadow-2xs"
               title="Add Topic"
             >
-              <Plus className="w-3.5 h-3.5" />
-              Add Topic
+              <Plus className="w-3.5 h-3.5 shrink-0" />
+              <span>Add Topic</span>
             </button>
           )}
           {isHod && (
-              <button onClick={handleDelete} className="p-1 text-slate-400 hover:text-rose-500 rounded">
+              <button 
+                onClick={handleDelete} 
+                className="p-1 text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded transition-colors shrink-0"
+                title="Delete Lesson"
+              >
                 <Trash2 className="w-3.5 h-3.5" />
               </button>
           )}
@@ -739,6 +749,7 @@ export default function SubjectDetails() {
   
   const [selectedMaterial, setSelectedMaterial] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [activeViewTab, setActiveViewTab] = useState('materials'); // 'materials' | 'coverage' | 'knowledge-graph'
   
   const [activeAIPanel, setActiveAIPanel] = useState(null); // 'summary', 'chat', or null
   const [chatMaterial, setChatMaterial] = useState(null);
@@ -826,107 +837,155 @@ export default function SubjectDetails() {
             </div>
         </div>
         
-        {(isHod || isFaculty) && (
+        <div className="flex items-center gap-2.5">
+          {/* View Mode Tabs */}
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl text-xs font-bold text-slate-600">
+            <button
+              onClick={() => setActiveViewTab('materials')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
+                activeViewTab === 'materials' ? 'bg-white text-indigo-600 shadow-2xs' : 'hover:text-slate-900'
+              }`}
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>Materials</span>
+            </button>
+            <button
+              onClick={() => setActiveViewTab('coverage')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
+                activeViewTab === 'coverage' ? 'bg-white text-indigo-600 shadow-2xs' : 'hover:text-slate-900'
+              }`}
+            >
+              <BarChart3 className="w-3.5 h-3.5" />
+              <span>Syllabus Coverage</span>
+            </button>
+            <button
+              onClick={() => setActiveViewTab('knowledge-graph')}
+              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg transition-all ${
+                activeViewTab === 'knowledge-graph' ? 'bg-white text-indigo-600 shadow-2xs' : 'hover:text-slate-900'
+              }`}
+            >
+              <Network className="w-3.5 h-3.5" />
+              <span>Knowledge Graph</span>
+            </button>
+          </div>
+
+          {(isHod || isFaculty) && activeViewTab === 'materials' && (
             <button 
                 onClick={() => setShowAddUnit(true)}
-                className="flex items-center gap-2 bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-bold shadow-md shadow-indigo-200 hover:bg-indigo-700 hover:shadow-indigo-300 transition-all active:scale-95 text-sm"
+                className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-xl font-bold shadow-md shadow-indigo-200 hover:bg-indigo-700 hover:shadow-indigo-300 transition-all active:scale-95 text-xs"
             >
-                <Plus className="w-4 h-4" /> Add Unit
+                <Plus className="w-3.5 h-3.5" /> Add Unit
             </button>
-        )}
+          )}
+        </div>
       </div>
 
-      {/* Main Two-Panel Layout */}
-      <div className="flex-1 flex gap-4 min-h-0">
-        
-        {/* Left/Center Panel - Viewer Area */}
-        <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col relative">
-           <MaterialViewer 
-             material={selectedMaterial} 
-             onDownload={handleDownload} 
-             onOpenSummary={() => setActiveAIPanel('summary')}
-             onOpenChat={() => setChatMaterial(selectedMaterial)}
-             onOpenQuiz={(info) => {
-               // Navigate to full-screen quiz page, passing context via state
-               navigate(`/quiz/${selectedMaterial.id}`, {
-                 state: {
-                   subjectId,
-                   subjectName: subject?.name,
-                   materialTitle: selectedMaterial?.title,
-                 }
-               });
-             }}
-           />
-           
-           {/* AI Overlays */}
-           {activeAIPanel === 'summary' && selectedMaterial && (
-             <AISummaryPanel material={selectedMaterial} subject={subject} onClose={() => setActiveAIPanel(null)} />
-           )}
-           {chatMaterial && (
-             <AIChatbotPanel material={chatMaterial} onClose={() => setChatMaterial(null)} />
-           )}
+      {/* Main View Area */}
+      {activeViewTab === 'coverage' && (
+        <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+          <SyllabusCoveragePanel subjectId={subjectId} />
         </div>
+      )}
 
-        {/* Right Sidebar - Course Structure */}
-        <div className="w-80 shrink-0 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
-          <div className="p-4 border-b border-slate-100 bg-slate-50/50">
-             <div className="flex items-center justify-between mb-3">
-                 <h2 className="font-bold text-slate-800 text-sm uppercase tracking-wider">Course Structure</h2>
-                 <span className="bg-slate-200 text-slate-600 text-xs font-bold px-2 py-0.5 rounded-full">{units.length} Units</span>
-             </div>
-             
-             <div className="relative">
-                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
-                 <input 
-                    type="text"
-                    placeholder="Search topics..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow placeholder:text-slate-400 font-medium"
-                 />
-             </div>
-          </div>
+      {activeViewTab === 'knowledge-graph' && (
+        <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+          <KnowledgeGraphPanel subjectId={subjectId} isHod={isHod} isFaculty={isFaculty} />
+        </div>
+      )}
+
+      {activeViewTab === 'materials' && (
+        /* Main Two-Panel Layout */
+        <div className="flex-1 flex gap-4 min-h-0">
           
-          <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-slate-50/30">
-            {units.length === 0 ? (
-                <div className="text-center p-6 mt-4">
-                    <BookOpen className="w-10 h-10 text-slate-200 mx-auto mb-3" />
-                    <p className="text-slate-500 text-sm font-medium mb-4">No units found.</p>
-                    {(isHod || isFaculty) && (
-                        <button 
-                            onClick={() => setShowAddUnit(true)}
-                            className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-100 transition-colors"
-                        >
-                            Add First Unit
-                        </button>
-                    )}
-                </div>
-            ) : (
-                units.map(unit => (
-                    <UnitItem 
-                        key={unit.id} 
-                        unit={unit} 
-                        role={role} 
-                        isHod={isHod} 
-                        isFaculty={isFaculty} 
-                        fetchUnits={fetchData} 
-                        showToastMessage={showToastMessage}
-                        onMaterialSelect={setSelectedMaterial}
-                        selectedMaterialId={selectedMaterial?.id}
-                        searchQuery={searchQuery}
-                        onMaterialDeleted={(deletedId) => {
-                          if (selectedMaterial?.id === deletedId) {
-                            setSelectedMaterial(null);
-                            setActiveAIPanel(null);
-                          }
-                        }}
-                    />
-                ))
+          {/* Left/Center Panel - Viewer Area */}
+          <div className="flex-1 bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col relative">
+            <MaterialViewer 
+              material={selectedMaterial} 
+              onDownload={handleDownload} 
+              onOpenSummary={() => setActiveAIPanel('summary')}
+              onOpenChat={() => setChatMaterial(selectedMaterial)}
+              onOpenQuiz={(info) => {
+                // Navigate to full-screen quiz page, passing context via state
+                navigate(`/quiz/${selectedMaterial.id}`, {
+                  state: {
+                    subjectId,
+                    subjectName: subject?.name,
+                    materialTitle: selectedMaterial?.title,
+                  }
+                });
+              }}
+            />
+            
+            {/* AI Overlays */}
+            {activeAIPanel === 'summary' && selectedMaterial && (
+              <AISummaryPanel material={selectedMaterial} subject={subject} onClose={() => setActiveAIPanel(null)} />
+            )}
+            {chatMaterial && (
+              <AIChatbotPanel material={chatMaterial} onClose={() => setChatMaterial(null)} />
             )}
           </div>
-        </div>
 
-      </div>
+          {/* Right Sidebar - Course Structure */}
+          <div className="w-80 shrink-0 bg-white rounded-2xl shadow-sm border border-slate-200 flex flex-col overflow-hidden">
+            <div className="p-4 border-b border-slate-100 bg-slate-50/50">
+              <div className="flex items-center justify-between mb-3">
+                  <h2 className="font-bold text-slate-800 text-sm uppercase tracking-wider">Course Structure</h2>
+                  <span className="bg-slate-200 text-slate-600 text-xs font-bold px-2 py-0.5 rounded-full">{units.length} Units</span>
+              </div>
+              
+              <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                  <input 
+                      type="text"
+                      placeholder="Search topics..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      className="w-full bg-white border border-slate-200 rounded-lg pl-9 pr-4 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent transition-shadow placeholder:text-slate-400 font-medium"
+                  />
+              </div>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-4 custom-scrollbar bg-slate-50/30">
+              {units.length === 0 ? (
+                  <div className="text-center p-6 mt-4">
+                      <BookOpen className="w-10 h-10 text-slate-200 mx-auto mb-3" />
+                      <p className="text-slate-500 text-sm font-medium mb-4">No units found.</p>
+                      {(isHod || isFaculty) && (
+                          <button 
+                              onClick={() => setShowAddUnit(true)}
+                              className="bg-indigo-50 text-indigo-700 px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-100 transition-colors"
+                          >
+                              Add First Unit
+                          </button>
+                      )}
+                  </div>
+              ) : (
+                  units.map(unit => (
+                      <UnitItem 
+                          key={unit.id} 
+                          unit={unit} 
+                          role={role} 
+                          isHod={isHod} 
+                          isFaculty={isFaculty} 
+                          fetchUnits={fetchData} 
+                          showToastMessage={showToastMessage}
+                          onMaterialSelect={setSelectedMaterial}
+                          selectedMaterialId={selectedMaterial?.id}
+                          searchQuery={searchQuery}
+                          onMaterialDeleted={(deletedId) => {
+                            if (selectedMaterial?.id === deletedId) {
+                              setSelectedMaterial(null);
+                              setActiveAIPanel(null);
+                            }
+                          }}
+                      />
+                  ))
+              )}
+            </div>
+          </div>
+
+        </div>
+      )}
 
       {showAddUnit && (
         <AddHierarchyModal

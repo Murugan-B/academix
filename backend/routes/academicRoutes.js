@@ -48,7 +48,7 @@ router.delete('/lessons/:lessonId', authMiddleware, hodOnly, validateHierarchy, 
 router.get('/lessons/:lessonId/topics', authMiddleware, anyRole, getTopics);
 
 // POST /api/academic/lessons/:lessonId/topics (HOD & FACULTY)
-router.post('/lessons/:lessonId/topics', authMiddleware, facultyOrHod, validateHierarchy, createTopic);
+router.post('/lessons/:lessonId/topics', authMiddleware, facultyOrHod, validateHierarchy, upload.single('file'), createTopic);
 
 // PUT /api/academic/topics/:id
 router.put('/topics/:topicId', authMiddleware, hodOnly, validateHierarchy, updateTopic);
@@ -80,5 +80,9 @@ router.post('/materials/:materialId/progress', authMiddleware, anyRole, toggleMa
 
 // GET /api/academic/topics/:topicId/progress
 router.get('/topics/:topicId/progress', authMiddleware, anyRole, getMaterialProgress);
+
+// -- SYLLABUS COVERAGE INTELLIGENCE --
+const syllabusCoverageController = require('../controllers/syllabusCoverageController');
+router.get('/subjects/:subjectId/syllabus-coverage', authMiddleware, anyRole, syllabusCoverageController.getSubjectSyllabusCoverage);
 
 module.exports = router;
