@@ -107,7 +107,7 @@ export default function Layout() {
       description: 'Departmental gap diagnosis, topic weaknesses & remedial plans',
       category: 'ACADEMIC',
       icon: AlertTriangle,
-      show: ['HOD', 'FACULTY', 'INSTITUTE_ADMIN', 'SUPER_ADMIN'].includes(role),
+      show: ['HOD', 'FACULTY', 'INSTITUTE_ADMIN'].includes(role),
       active: currentPath === '/cohort-learning-gaps'
     },
     {
@@ -116,7 +116,7 @@ export default function Layout() {
       description: 'Review and approve peer-submitted student notes',
       category: 'ADMINISTRATION',
       icon: CheckSquare,
-      show: ['FACULTY', 'HOD', 'INSTITUTE_ADMIN', 'SUPER_ADMIN'].includes(role),
+      show: ['FACULTY', 'HOD', 'INSTITUTE_ADMIN'].includes(role),
       active: currentPath === '/resource-approvals'
     },
     {
