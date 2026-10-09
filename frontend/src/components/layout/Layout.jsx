@@ -39,6 +39,7 @@ export default function Layout() {
     if (role === 'INSTITUTE_ADMIN') return '/institute-admin';
     if (role === 'HOD') return '/hod';
     if (role === 'FACULTY') return '/faculty';
+    if (role === 'PUBLIC_USER') return '/public-search';
     return '/student';
   };
 
@@ -62,8 +63,17 @@ export default function Layout() {
       description: 'Overview, departmental metrics & approvals',
       category: 'PAGES',
       icon: LayoutDashboard,
-      show: true,
+      show: role !== 'PUBLIC_USER',
       active: currentPath === getDashboardRoute()
+    },
+    {
+      to: '/public-search',
+      label: 'Public Search',
+      description: 'Search approved open notes & AI educational knowledge',
+      category: 'SEARCH',
+      icon: Search,
+      show: true,
+      active: currentPath === '/public-search'
     },
     {
       to: '/subjects',
@@ -125,7 +135,7 @@ export default function Layout() {
       description: 'Manage faculty, mentors and student accounts',
       category: 'ADMINISTRATION',
       icon: Users,
-      show: role !== 'STUDENT',
+      show: !['STUDENT', 'PUBLIC_USER'].includes(role),
       active: currentPath === '/users'
     },
     {

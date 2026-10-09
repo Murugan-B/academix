@@ -1,6 +1,9 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import LandingPage from './pages/LandingPage';
 import Login from './pages/Login';
+import Register from './pages/Register';
+import ForgotPassword from './pages/ForgotPassword';
+import PublicSearch from './pages/PublicSearch';
 import UsersAndRoles from './pages/UsersAndRoles';
 import Settings from './pages/Settings';
 import Subjects from './pages/Subjects';
@@ -26,11 +29,12 @@ function App() {
     <>
       <ToastContainer />
       <Routes>
-        {/* Public Landing Page */}
+        {/* Public Landing & Authentication Pages */}
         <Route path="/" element={<LandingPage />} />
-
-        {/* Public Login Page */}
         <Route path="/login" element={<Login />} />
+        <Route path="/register" element={<Register />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/public-search" element={<PublicSearch />} />
         
         {/* Protected Dashboard & Application Workspace */}
         <Route element={<Layout />}>

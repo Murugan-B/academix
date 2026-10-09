@@ -26,9 +26,11 @@ const learningRoutes = require('./routes/learningRoutes');
 const mentorRoutes = require('./routes/mentorRoutes');
 const studentResourceRoutes = require('./routes/studentResourceRoutes');
 const knowledgeGraphRoutes = require('./routes/knowledgeGraphRoutes');
+const publicRoutes = require('./routes/publicRoutes');
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/public', publicRoutes);
 app.use('/api/notifications', notificationRoutes);
 app.use('/api/institutes', instituteRoutes);
 app.use('/api/departments', departmentRoutes);

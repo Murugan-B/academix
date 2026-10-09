@@ -2,39 +2,58 @@ import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import api from '../api/axios';
 import {
-  BookOpen, Eye, EyeOff, ArrowLeft, Sparkles, CheckCircle2, Lock, Mail,
-  BrainCircuit, Target, Search, UserPlus
+  BookOpen, Eye, EyeOff, ArrowLeft, Sparkles, CheckCircle2,
+  Lock, Mail, User, Shield, Search, Bot, ArrowRight
 } from 'lucide-react';
 
-export default function Login() {
+export default function Register() {
   const navigate = useNavigate();
+  const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const handleLogin = async (e) => {
+  const handleRegister = async (e) => {
     e.preventDefault();
     if (loading) return;
     setError('');
+
+    if (password !== confirmPassword) {
+      setError('Passwords do not match.');
+      return;
+    }
+
+    if (password.length < 6) {
+      setError('Password must be at least 6 characters long.');
+      return;
+    }
+
     setLoading(true);
 
     try {
-      const res = await api.post('/auth/login', { email, password });
-      localStorage.setItem('token', res.data.token);
-      localStorage.setItem('user', JSON.stringify(res.data.user));
-      
-      const role = res.data.user?.role;
-      if (role === 'SUPER_ADMIN') navigate('/super-admin');
-      else if (role === 'INSTITUTE_ADMIN') navigate('/institute-admin');
-      else if (role === 'HOD') navigate('/hod');
-      else if (role === 'FACULTY') navigate('/faculty');
-      else if (role === 'STUDENT') navigate('/student');
-      else if (role === 'PUBLIC_USER') navigate('/public-search');
-      else navigate('/');
+      const res = await api.post('/auth/register-public', {
+        name,
+        email,
+        password
+      });
+
+      // Save token & user payload
+      if (res.data.token && res.data.user) {
+        localStorage.setItem('token', res.data.token);
+        localStorage.setItem('user', JSON.stringify(res.data.user));
+        navigate('/public-search');
+      } else {
+        navigate('/login');
+      }
     } catch (err) {
-      setError(err.response?.data?.message || err.response?.data?.error || 'Invalid credentials or login failed');
+      setError(
+        err.response?.data?.message ||
+        err.response?.data?.error ||
+        'Registration failed. Please check your details and try again.'
+      );
     } finally {
       setLoading(false);
     }
@@ -44,7 +63,7 @@ export default function Login() {
     <div className="min-h-screen bg-[#fafafa] flex flex-col justify-between selection:bg-indigo-100 selection:text-indigo-900 font-sans relative overflow-hidden">
       
       {/* Background Decorative Glows */}
-      <div className="absolute top-0 right-1/3 w-96 h-96 bg-indigo-200/25 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-0 right-1/4 w-96 h-96 bg-indigo-200/25 rounded-full blur-3xl pointer-events-none" />
       <div className="absolute bottom-10 left-10 w-96 h-96 bg-violet-200/25 rounded-full blur-3xl pointer-events-none" />
 
       {/* Top Navbar */}
@@ -58,81 +77,80 @@ export default function Login() {
           </span>
         </Link>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-4">
           <Link
             to="/public-search"
             className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1.5 transition-colors"
           >
-            <Search className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Public Search</span>
+            <Search className="w-4 h-4" />
+            <span className="hidden sm:inline">Try Public Search</span>
           </Link>
           <Link
-            to="/"
-            className="text-xs font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1.5 transition-colors group"
+            to="/login"
+            className="text-xs font-bold text-slate-500 hover:text-indigo-600 flex items-center gap-1.5 transition-colors"
           >
-            <ArrowLeft className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
-            <span>Home</span>
+            <span>Sign In</span>
           </Link>
         </div>
       </header>
 
-      {/* Main Login Viewport */}
+      {/* Main Register Viewport */}
       <main className="flex-1 flex items-center justify-center p-4 sm:p-6 lg:p-8 relative z-10">
         <div className="w-full max-w-4xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
           
           {/* Left Hero Panel (Desktop) */}
           <div className="hidden lg:block lg:col-span-6 space-y-6 pr-4">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-indigo-50 border border-indigo-150 text-indigo-700 text-xs font-bold">
-              <Sparkles className="w-3.5 h-3.5 text-indigo-600" />
-              <span>Academic Workspace</span>
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-150 text-emerald-700 text-xs font-bold">
+              <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+              <span>Public Scholar Access</span>
             </div>
 
             <h1 className="text-4xl font-black text-slate-900 tracking-tight leading-tight">
-              Welcome back to <br />
+              Join Academix as a <br />
               <span className="bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 to-violet-600">
-                Academix.
+                Public Scholar.
               </span>
             </h1>
 
             <p className="text-sm text-slate-600 leading-relaxed">
-              Continue your academic journey with AI-powered personalized learning, smart assessments, open search, and course intelligence.
+              Explore open academic resources, perform intelligent AI searches with genuine source citations, and access verified educational knowledge.
             </p>
 
             <div className="space-y-3 pt-2">
               <div className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-150 shadow-2xs">
                 <div className="p-2 bg-indigo-50 text-indigo-600 rounded-xl shrink-0">
-                  <BrainCircuit className="w-4 h-4" />
+                  <Search className="w-4 h-4" />
                 </div>
                 <div>
-                  <h2 className="text-xs font-bold text-slate-800">Personalized Learning Hub</h2>
-                  <p className="text-[11px] text-slate-500">Targeted topic guidance from actual quiz mistakes</p>
+                  <h2 className="text-xs font-bold text-slate-800">Unified Academic & External Search</h2>
+                  <p className="text-[11px] text-slate-500">Search approved peer notes & verified encyclopedic sources</p>
                 </div>
               </div>
 
               <div className="flex items-center gap-3 p-3 bg-white rounded-2xl border border-slate-150 shadow-2xs">
-                <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl shrink-0">
-                  <Target className="w-4 h-4" />
+                <div className="p-2 bg-violet-50 text-violet-600 rounded-xl shrink-0">
+                  <Bot className="w-4 h-4" />
                 </div>
                 <div>
-                  <h2 className="text-xs font-bold text-slate-800">Grounded AI Assistant & Search</h2>
-                  <p className="text-[11px] text-slate-500">Curriculum context, lecture analysis, and open knowledge search</p>
+                  <h2 className="text-xs font-bold text-slate-800">Grounded AI Search</h2>
+                  <p className="text-[11px] text-slate-500">Accurate explanations with transparent source citations</p>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* Right Column: Sign In Card */}
+          {/* Right Column: Register Card */}
           <div className="lg:col-span-6 w-full max-w-md mx-auto">
             <div className="bg-white/95 backdrop-blur-xl p-8 rounded-3xl border border-slate-200/90 shadow-xl shadow-slate-200/50 space-y-6">
               
               {/* Card Header */}
               <div className="space-y-1">
                 <div className="w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold mb-3">
-                  <Lock className="w-5 h-5" />
+                  <User className="w-5 h-5" />
                 </div>
-                <h2 className="text-2xl font-black text-slate-900 tracking-tight">Sign in to Academix</h2>
+                <h2 className="text-2xl font-black text-slate-900 tracking-tight">Create Public Account</h2>
                 <p className="text-xs text-slate-500 font-medium">
-                  Enter your credentials to access your academic workspace
+                  Free access to public search and AI knowledge tools
                 </p>
               </div>
 
@@ -142,18 +160,35 @@ export default function Login() {
                 </div>
               )}
 
-              {/* Login Form */}
-              <form onSubmit={handleLogin} className="space-y-4">
+              {/* Form */}
+              <form onSubmit={handleRegister} className="space-y-4">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
-                    Email address
+                    Full Name
+                  </label>
+                  <div className="relative">
+                    <User className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="text"
+                      required
+                      placeholder="Jane Doe"
+                      value={name}
+                      onChange={(e) => setName(e.target.value)}
+                      className="w-full bg-slate-50/70 border border-slate-200 rounded-xl pl-10 pr-3.5 py-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white transition-all"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Email Address
                   </label>
                   <div className="relative">
                     <Mail className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                     <input
                       type="email"
                       required
-                      placeholder="you@academix.edu"
+                      placeholder="scholar@example.com"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
                       className="w-full bg-slate-50/70 border border-slate-200 rounded-xl pl-10 pr-3.5 py-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white transition-all"
@@ -162,23 +197,15 @@ export default function Login() {
                 </div>
 
                 <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider">
-                      Password
-                    </label>
-                    <Link
-                      to="/forgot-password"
-                      className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
-                    >
-                      Forgot password?
-                    </Link>
-                  </div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Password
+                  </label>
                   <div className="relative">
                     <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                     <input
                       type={showPassword ? 'text' : 'password'}
                       required
-                      placeholder="••••••••"
+                      placeholder="At least 6 characters"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
                       className="w-full bg-slate-50/70 border border-slate-200 rounded-xl pl-10 pr-10 py-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white transition-all"
@@ -194,32 +221,46 @@ export default function Login() {
                   </div>
                 </div>
 
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1.5">
+                    Confirm Password
+                  </label>
+                  <div className="relative">
+                    <Lock className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                    <input
+                      type={showPassword ? 'text' : 'password'}
+                      required
+                      placeholder="Repeat your password"
+                      value={confirmPassword}
+                      onChange={(e) => setConfirmPassword(e.target.value)}
+                      className="w-full bg-slate-50/70 border border-slate-200 rounded-xl pl-10 pr-3.5 py-2.5 text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white transition-all"
+                    />
+                  </div>
+                </div>
+
                 <button
                   type="submit"
                   disabled={loading}
                   className="w-full py-3 px-4 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white text-xs font-bold rounded-xl shadow-md shadow-indigo-200 hover:shadow-indigo-300 transition-all active:scale-[0.98] disabled:opacity-50 cursor-pointer"
                 >
-                  {loading ? 'Signing in...' : 'Sign In'}
+                  {loading ? 'Creating Account...' : 'Create Public Account'}
                 </button>
               </form>
 
-              {/* Public Registration & Discovery Links */}
-              <div className="pt-2 border-t border-slate-100 space-y-2 text-center">
-                <p className="text-xs text-slate-600">
-                  Don't have an institutional account?{' '}
-                  <Link to="/register" className="font-bold text-indigo-600 hover:text-indigo-800 inline-flex items-center gap-1">
-                    <UserPlus className="w-3.5 h-3.5" />
-                    Sign up as Public User
+              {/* Footer Links */}
+              <div className="pt-2 border-t border-slate-100 text-center space-y-2">
+                <p className="text-xs text-slate-500">
+                  Already have an account?{' '}
+                  <Link to="/login" className="font-bold text-indigo-600 hover:text-indigo-800">
+                    Sign In
                   </Link>
                 </p>
-
                 <div>
                   <Link
-                    to="/public-search"
-                    className="text-xs font-semibold text-slate-500 hover:text-indigo-600 transition-colors inline-flex items-center gap-1"
+                    to="/"
+                    className="text-xs font-bold text-slate-400 hover:text-slate-600 transition-colors inline-flex items-center gap-1"
                   >
-                    <Search className="w-3.5 h-3.5" />
-                    Explore Public Educational Search
+                    ← Back to Academix Home
                   </Link>
                 </div>
               </div>

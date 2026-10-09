@@ -21,6 +21,7 @@ export default function LandingPage() {
     if (role === 'INSTITUTE_ADMIN') return '/institute-admin';
     if (role === 'HOD') return '/hod';
     if (role === 'FACULTY') return '/faculty';
+    if (role === 'PUBLIC_USER') return '/public-search';
     return '/student';
   };
 
@@ -51,6 +52,12 @@ export default function LandingPage() {
 
           {/* Desktop Nav */}
           <nav className="hidden md:flex items-center gap-6 text-[13px] font-semibold text-slate-600">
+            <Link
+              to="/public-search"
+              className="text-indigo-600 hover:text-indigo-800 transition-colors font-bold flex items-center gap-1"
+            >
+              <span>Public Search</span>
+            </Link>
             <button
               onClick={() => scrollToSection('features')}
               className="hover:text-indigo-600 transition-colors cursor-pointer"
@@ -78,23 +85,31 @@ export default function LandingPage() {
           </nav>
 
           {/* Right Action */}
-          <div className="hidden md:flex items-center gap-3">
+          <div className="hidden md:flex items-center gap-2.5">
             {user ? (
               <button
                 onClick={() => navigate(getDashboardRoute())}
                 className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-all flex items-center gap-1.5 active:scale-95"
               >
-                <span>Go to Dashboard</span>
+                <span>{user.role === 'PUBLIC_USER' ? 'My Hub' : 'Go to Dashboard'}</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             ) : (
-              <Link
-                to="/login"
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-all flex items-center gap-1.5 active:scale-95"
-              >
-                <span>Sign In</span>
-                <ArrowRight className="w-4 h-4" />
-              </Link>
+              <>
+                <Link
+                  to="/login"
+                  className="px-3.5 py-1.5 text-xs font-semibold text-slate-600 hover:text-indigo-600 transition-colors"
+                >
+                  Sign In
+                </Link>
+                <Link
+                  to="/register"
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-all flex items-center gap-1.5 active:scale-95"
+                >
+                  <span>Join Free</span>
+                  <ArrowRight className="w-4 h-4" />
+                </Link>
+              </>
             )}
           </div>
 
