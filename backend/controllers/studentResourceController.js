@@ -293,7 +293,7 @@ exports.getApprovedResources = async (req, res) => {
       SELECT 
         sr.id, sr.title, sr.description, sr.tags, sr.semester,
         sr.file_name, sr.file_url, sr.file_type, sr.file_size,
-        sr.source_type, sr.status, sr.created_at, sr.updated_at,
+        sr.source_type, sr.status, sr.is_public, sr.created_at, sr.updated_at,
         sr.approved_at, sr.approved_by,
         s.id as subject_id, s.name as subject_name, s.code as subject_code,
         u.id as unit_id, u.title as unit_title, u.unit_number,
@@ -316,10 +316,13 @@ exports.getApprovedResources = async (req, res) => {
 
     const params = [];
 
-    // Filter by department if student/faculty
-    if (userDept && userRole !== 'SUPER_ADMIN') {
+    // STRICT ISOLATION: PUBLIC_USER can ONLY see explicitly public approved resources
+    if (userRole === 'PUBLIC_USER') {
+      query += ` AND sr.is_public = TRUE`;
+    } else if (userDept && userRole !== 'SUPER_ADMIN' && userRole !== 'INSTITUTE_ADMIN') {
+      // Institutional students/faculty see their department resources + public resources
       params.push(userDept);
-      query += ` AND sr.department_id = $${params.length}`;
+      query += ` AND (sr.department_id = $${params.length} OR sr.is_public = TRUE)`;
     }
 
     // Filter by source_type (FACULTY / STUDENT)
@@ -670,9 +673,14 @@ exports.getSignedUrl = async (req, res) => {
         }
       }
     } else {
-      // If approved, verify same department (or admin)
-      if (userDept && userRole !== 'SUPER_ADMIN' && userDept !== resource.department_id) {
-        return res.status(403).json({ error: 'Access denied: Resource belongs to another department.' });
+      // If approved, verify public flag or institutional membership
+      if (!resource.is_public) {
+        if (userRole === 'PUBLIC_USER') {
+          return res.status(403).json({ error: 'Access denied: This resource is restricted to registered institute members.' });
+        }
+        if (userRole !== 'SUPER_ADMIN' && userRole !== 'INSTITUTE_ADMIN' && userDept && userDept !== resource.department_id) {
+          return res.status(403).json({ error: 'Access denied: Resource belongs to another department.' });
+        }
       }
     }
 
@@ -722,8 +730,13 @@ async function handleResourceStream(req, res, disposition) {
         }
       }
     } else {
-      if (userDept && userRole !== 'SUPER_ADMIN' && userDept !== resource.department_id) {
-        return res.status(403).json({ error: 'Access denied: Resource belongs to another department.' });
+      if (!resource.is_public) {
+        if (userRole === 'PUBLIC_USER') {
+          return res.status(403).json({ error: 'Access denied: This resource is restricted to registered institute members.' });
+        }
+        if (userRole !== 'SUPER_ADMIN' && userRole !== 'INSTITUTE_ADMIN' && userDept && userDept !== resource.department_id) {
+          return res.status(403).json({ error: 'Access denied: Resource belongs to another department.' });
+        }
       }
     }
 
@@ -765,6 +778,45 @@ async function handleResourceStream(req, res, disposition) {
 
 exports.viewResource = (req, res) => handleResourceStream(req, res, 'inline');
 exports.downloadResource = (req, res) => handleResourceStream(req, res, 'attachment');
+
+// 10. TOGGLE PUBLIC STATUS (FACULTY, HOD, ADMIN)
+exports.togglePublicStatus = async (req, res) => {
+  const { id } = req.params;
+  const { is_public } = req.body;
+  const userRole = req.user.role;
+  const userDept = req.user.department_id;
+
+  try {
+    const resResult = await db.query('SELECT * FROM student_resources WHERE id = $1', [id]);
+    if (resResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Student resource not found.' });
+    }
+    const resource = resResult.rows[0];
+
+    if (!['SUPER_ADMIN', 'INSTITUTE_ADMIN', 'HOD', 'FACULTY'].includes(userRole)) {
+      return res.status(403).json({ error: 'Only faculty and administrators can modify public resource visibility.' });
+    }
+
+    if ((userRole === 'HOD' || userRole === 'FACULTY') && userDept !== resource.department_id) {
+      return res.status(403).json({ error: 'You are not authorized to modify resources from another department.' });
+    }
+
+    const newPublicStatus = typeof is_public === 'boolean' ? is_public : !resource.is_public;
+
+    const updateRes = await db.query(
+      `UPDATE student_resources SET is_public = $1, updated_at = NOW() WHERE id = $2 RETURNING *`,
+      [newPublicStatus, id]
+    );
+
+    res.json({
+      message: `Resource is now ${newPublicStatus ? 'publicly accessible' : 'restricted to institute members'}.`,
+      resource: updateRes.rows[0]
+    });
+  } catch (err) {
+    console.error('[STUDENT_RESOURCES] togglePublicStatus error:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+};
 
 // 10. DELETE RESOURCE
 exports.deleteResource = async (req, res) => {

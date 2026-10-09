@@ -1,120 +1,41 @@
 const db = require('../db');
-const aiService = require('../services/ai/aiService');
-const axios = require('axios');
-const { classifyQuery, retrieveCurrentInformation, formatCurrentContextBlock } = require('../services/ai/freshnessService');
+const { searchWeb } = require('../services/search/searchService');
+const conversationalService = require('../services/ai/conversationalService');
 
 /**
- * Fetch external educational resources via Wikipedia API & DuckDuckGo fallback
- */
-async function fetchExternalEducationalResults(query) {
-  const externalResults = [];
-  const cleanQuery = query.replace(/[?.,!]/g, '').trim();
-
-  if (!cleanQuery) return externalResults;
-
-  // 1. Wikipedia API Search for encyclopedic concepts
-  try {
-    const wikiSearch = await axios.get('https://en.wikipedia.org/w/api.php', {
-      params: {
-        action: 'query',
-        list: 'search',
-        srsearch: cleanQuery,
-        format: 'json',
-        utf8: 1,
-        srlimit: 4
-      },
-      headers: { 'User-Agent': 'AcademixPublicSearch/1.0' },
-      timeout: 4000
-    });
-
-    const hits = wikiSearch.data?.query?.search || [];
-    for (const hit of hits) {
-      try {
-        const pageRes = await axios.get('https://en.wikipedia.org/w/api.php', {
-          params: {
-            action: 'query',
-            prop: 'extracts|info',
-            inprop: 'url',
-            exintro: 1,
-            explaintext: 1,
-            titles: hit.title,
-            format: 'json'
-          },
-          headers: { 'User-Agent': 'AcademixPublicSearch/1.0' },
-          timeout: 3500
-        });
-
-        const pages = pageRes.data?.query?.pages || {};
-        const pageId = Object.keys(pages)[0];
-        if (pageId && pages[pageId]?.extract) {
-          externalResults.push({
-            id: `wiki-${pageId}`,
-            title: pages[pageId].title,
-            snippet: pages[pageId].extract.substring(0, 300) + (pages[pageId].extract.length > 300 ? '...' : ''),
-            url: pages[pageId].fullurl || `https://en.wikipedia.org/wiki/${encodeURIComponent(pages[pageId].title.replace(/ /g, '_'))}`,
-            source: 'Wikipedia (Verified Reference)',
-            sourceType: 'EXTERNAL_VERIFIED_REFERENCE',
-            badge: 'External Reference'
-          });
-        }
-      } catch (pageErr) {
-        // Continue with other items
-      }
-    }
-  } catch (err) {
-    console.warn('[PublicSearch] Wikipedia external search notice:', err.message);
-  }
-
-  // 2. DuckDuckGo Instant Answer if Wikipedia returned few results
-  if (externalResults.length < 2) {
-    try {
-      const ddgRes = await axios.get(`https://api.duckduckgo.com/?q=${encodeURIComponent(cleanQuery)}&format=json&no_html=1&skip_disambig=1`, {
-        timeout: 3500,
-        headers: { 'User-Agent': 'AcademixPublicSearch/1.0' }
-      });
-      const data = ddgRes.data;
-      if (data.AbstractText) {
-        externalResults.push({
-          id: `ddg-${Date.now()}`,
-          title: data.Heading || cleanQuery,
-          snippet: data.AbstractText,
-          url: data.AbstractURL || 'https://duckduckgo.com',
-          source: 'DuckDuckGo Instant Answer',
-          sourceType: 'EXTERNAL_VERIFIED_REFERENCE',
-          badge: 'External Reference'
-        });
-      }
-    } catch (err) {
-      console.warn('[PublicSearch] DuckDuckGo fallback search notice:', err.message);
-    }
-  }
-
-  return externalResults;
-}
-
-/**
- * 1. Normal Search
- * Searches approved public student resources + external verified educational references
+ * 1. Global Normal Search
+ * Searches genuine Web Index + Public Academix Community Resources (is_public = TRUE & status = APPROVED)
  */
 exports.normalSearch = async (req, res) => {
-  const { query, category } = req.query;
+  const { query, search_type = 'web', page = 1, limit = 10 } = req.query;
 
   try {
     if (!query || typeof query !== 'string' || !query.trim()) {
       return res.json({
         query: '',
-        internalResults: [],
-        externalResults: [],
-        totalInternal: 0,
-        totalExternal: 0
+        searchType: search_type,
+        webResults: [],
+        images: [],
+        publicResources: [],
+        totalWeb: 0,
+        totalPublicResources: 0,
+        provider: 'None'
       });
     }
 
-    const searchTerm = `%${query.trim()}%`;
+    const cleanQuery = query.trim();
 
-    // 1. Fetch ONLY approved public student resources
-    // Strictly isolates internal confidential materials, unpublished syllabus, draft materials, and private records
-    const internalSql = `
+    // 1. Fetch genuine web / image search results
+    const webSearchPromise = searchWeb({
+      query: cleanQuery,
+      searchType: search_type,
+      page: parseInt(page, 10) || 1,
+      limit: parseInt(limit, 10) || 10
+    });
+
+    // 2. Fetch ONLY strictly public and approved academic resources
+    // CRITICAL SECURITY: is_public = TRUE AND status = 'APPROVED'
+    const publicResourcePromise = db.query(`
       SELECT 
         sr.id,
         sr.title,
@@ -127,11 +48,11 @@ exports.normalSearch = async (req, res) => {
         sr.created_at,
         d.name as department_name,
         s.name as subject_name,
-        'APPROVED_ACADEMIC_RESOURCE' as source_type
+        'PUBLIC_ACADEMIC_RESOURCE' as source_type
       FROM student_resources sr
       LEFT JOIN departments d ON sr.department_id = d.id
       LEFT JOIN subjects s ON sr.subject_id = s.id
-      WHERE sr.status = 'APPROVED'
+      WHERE sr.status = 'APPROVED' AND sr.is_public = TRUE
         AND (
           sr.title ILIKE $1 
           OR sr.description ILIKE $1 
@@ -139,15 +60,15 @@ exports.normalSearch = async (req, res) => {
           OR s.name ILIKE $1
         )
       ORDER BY sr.created_at DESC
-      LIMIT 20
-    `;
+      LIMIT 10
+    `, [`%${cleanQuery}%`]);
 
-    const internalRes = await db.query(internalSql, [searchTerm]);
+    const [webData, publicResourceRes] = await Promise.all([webSearchPromise, publicResourcePromise]);
 
-    const formattedInternal = internalRes.rows.map(r => ({
+    const formattedPublicResources = (publicResourceRes.rows || []).map(r => ({
       id: r.id,
       title: r.title,
-      description: r.description || 'Public academic notes & study material',
+      description: r.description || 'Public community study note',
       tags: r.tags || [],
       fileName: r.file_name,
       fileUrl: r.file_url,
@@ -156,133 +77,44 @@ exports.normalSearch = async (req, res) => {
       department: r.department_name,
       subject: r.subject_name,
       createdAt: r.created_at,
-      sourceType: 'APPROVED_ACADEMIC_RESOURCE',
-      sourceBadge: 'Approved Academic Note'
+      sourceType: 'PUBLIC_ACADEMIC_RESOURCE',
+      sourceBadge: 'Open Academix Resource'
     }));
 
-    // 2. Fetch external educational resources
-    const externalResults = await fetchExternalEducationalResults(query.trim());
-
-    res.json({
-      query: query.trim(),
-      internalResults: formattedInternal,
-      externalResults,
-      totalInternal: formattedInternal.length,
-      totalExternal: externalResults.length
-    });
-  } catch (error) {
-    console.error('Normal search error:', error);
-    res.status(500).json({ message: 'Error processing public search.' });
-  }
-};
-
-/**
- * 2. Public AI Search
- * Performs AI grounded answering without exposing private institutional materials
- */
-exports.aiSearch = async (req, res) => {
-  const { query, provider = 'gemini' } = req.body;
-
-  try {
-    if (!query || typeof query !== 'string' || !query.trim()) {
-      return res.status(400).json({ message: 'Search question is required.' });
-    }
-
-    const cleanQuery = query.trim();
-    const queryClassification = classifyQuery(cleanQuery, false);
-
-    let retrievedContext = '';
-    let sources = [];
-    let sourceClassification = 'GENERAL_AI_KNOWLEDGE';
-    let citationDisclaimer = 'Generated using general AI academic intelligence. No internal institutional material was retrieved.';
-
-    // 1. Check if time-sensitive query (e.g. current office holders, latest news)
-    if (queryClassification.isTimeSensitive) {
-      const liveSources = await retrieveCurrentInformation(cleanQuery);
-      if (liveSources.length > 0) {
-        sourceClassification = 'EXTERNAL_VERIFIED_REFERENCE';
-        citationDisclaimer = 'Grounded in fresh, verified external live sources.';
-        sources = liveSources.map(s => ({
-          title: s.title,
-          url: s.url,
-          snippet: s.snippet,
-          sourceType: 'EXTERNAL_VERIFIED_REFERENCE',
-          sourceName: s.source
-        }));
-        retrievedContext = formatCurrentContextBlock(liveSources);
-      }
-    } else {
-      // 2. Search approved public student resources for relevant academic context
-      const searchTerm = `%${cleanQuery}%`;
-      const publicDocsRes = await db.query(
-        `SELECT id, title, description, tags, file_name, file_url
-         FROM student_resources
-         WHERE status = 'APPROVED'
-           AND (title ILIKE $1 OR description ILIKE $1 OR array_to_string(tags, ' ') ILIKE $1)
-         ORDER BY created_at DESC
-         LIMIT 3`,
-        [searchTerm]
-      );
-
-      if (publicDocsRes.rows.length > 0) {
-        sourceClassification = 'APPROVED_ACADEMIC_RESOURCE';
-        citationDisclaimer = 'Grounded in approved public academic resources.';
-        sources = publicDocsRes.rows.map(doc => ({
-          id: doc.id,
-          title: doc.title,
-          description: doc.description,
-          fileUrl: doc.file_url,
-          sourceType: 'APPROVED_ACADEMIC_RESOURCE',
-          sourceName: 'Academix Approved Resource'
-        }));
-
-        retrievedContext = `\n=== RETRIEVED APPROVED PUBLIC ACADEMIC MATERIALS ===\n` +
-          publicDocsRes.rows.map((doc, idx) => `[Source ${idx + 1}] Title: ${doc.title}\nDescription: ${doc.description || 'N/A'}`).join('\n\n') +
-          `\n\nINSTRUCTIONS: Answer the user question based on these public resources where applicable. If the context does not fully answer the question, supplement with accurate academic explanations. Do not hallucinate private data.`;
-      }
-    }
-
-    // Call LLM provider pipeline
-    const prompt = `You are Academix AI, an intelligent educational assistant.
-User Question: "${cleanQuery}"
-
-${retrievedContext}
-
-Please provide a clear, accurate, and pedagogical explanation. Format your answer with clean Markdown (bullet points, clear headers, concise definitions).
-If citing sources, reference only genuine verified sources from the context provided. If no internal academic material was retrieved, rely on general knowledge and explicitly explain the concept clearly.`;
-
-    let aiAnswer = '';
-    try {
-      const selectedProvider = aiService.getProvider(provider || 'gemini');
-      aiAnswer = await selectedProvider.askQuestion(retrievedContext || 'General academic domain knowledge', cleanQuery);
-    } catch (aiErr) {
-      console.error('[PublicAISearch] Primary AI provider error, fallback:', aiErr.message);
-      // Try openrouter or gemini fallback
-      const fallbackProvider = provider === 'gemini' ? 'openrouter' : 'gemini';
+    // 3. Persistent History for Authenticated User
+    if (req.user?.id) {
       try {
-        const fallback = aiService.getProvider(fallbackProvider);
-        aiAnswer = await fallback.askQuestion(retrievedContext || 'General academic domain knowledge', cleanQuery);
-      } catch (fallbackErr) {
-        throw new Error('AI search provider is temporarily unavailable.');
+        await db.query(
+          `INSERT INTO search_history (user_id, query, search_mode, result_count)
+           VALUES ($1, $2, $3, $4)`,
+          [req.user.id, cleanQuery, search_type, (webData.results?.length || 0) + formattedPublicResources.length]
+        );
+      } catch (histErr) {
+        console.warn('[PublicSearch] Save search history warning:', histErr.message);
       }
     }
 
     res.json({
       query: cleanQuery,
-      answer: aiAnswer,
-      sourceClassification,
-      citationDisclaimer,
-      sources,
-      providerUsed: provider || 'gemini'
+      searchType: search_type,
+      page: parseInt(page, 10) || 1,
+      webResults: webData.results || [],
+      images: webData.images || [],
+      publicResources: formattedPublicResources,
+      totalWeb: webData.totalResults || 0,
+      totalImages: webData.totalImages || 0,
+      totalPublicResources: formattedPublicResources.length,
+      provider: webData.provider
     });
   } catch (error) {
-    console.error('Public AI search error:', error);
-    res.status(500).json({ message: error.message || 'Error processing AI search.' });
+    console.error('Normal search error:', error);
+    res.status(500).json({ message: 'Error processing global search.', error: error.message });
   }
 };
 
 /**
- * Get Featured Public Academic Resources for Landing/Search Page
+ * 2. Featured Open Academic Resources
+ * Returns ONLY verified public resources (is_public = TRUE AND status = 'APPROVED')
  */
 exports.getFeaturedResources = async (req, res) => {
   try {
@@ -302,7 +134,7 @@ exports.getFeaturedResources = async (req, res) => {
       FROM student_resources sr
       LEFT JOIN departments d ON sr.department_id = d.id
       LEFT JOIN subjects s ON sr.subject_id = s.id
-      WHERE sr.status = 'APPROVED'
+      WHERE sr.status = 'APPROVED' AND sr.is_public = TRUE
       ORDER BY sr.created_at DESC
       LIMIT 8
     `);
@@ -310,6 +142,241 @@ exports.getFeaturedResources = async (req, res) => {
     res.json(result.rows);
   } catch (error) {
     console.error('Get featured resources error:', error);
-    res.status(500).json({ message: 'Failed to fetch featured resources.' });
+    res.status(500).json({ message: 'Failed to fetch public resources.' });
+  }
+};
+
+/**
+ * 3. Conversational AI Assistant & Search
+ * Supports multi-turn conversation, web-grounded research, and persistent chat history
+ */
+exports.aiChat = async (req, res) => {
+  const { query, conversationId, provider = 'gemini', includeWebSearch = true } = req.body;
+  const userId = req.user?.id;
+
+  try {
+    if (!query || typeof query !== 'string' || !query.trim()) {
+      return res.status(400).json({ message: 'Query is required.' });
+    }
+
+    const cleanQuery = query.trim();
+    let historyMessages = [];
+    let currentConvId = conversationId;
+
+    // Load past conversation messages if conversationId is provided and owned by user
+    if (currentConvId && userId) {
+      const convCheck = await db.query(
+        `SELECT id FROM ai_conversations WHERE id = $1 AND user_id = $2`,
+        [currentConvId, userId]
+      );
+      if (convCheck.rowCount > 0) {
+        const msgRes = await db.query(
+          `SELECT sender, content FROM ai_messages WHERE conversation_id = $1 ORDER BY created_at ASC`,
+          [currentConvId]
+        );
+        historyMessages = msgRes.rows.map(m => ({
+          role: m.sender === 'user' ? 'user' : 'assistant',
+          content: m.content
+        }));
+      } else {
+        currentConvId = null; // Invalid or unauthorized conversation, generate new
+      }
+    }
+
+    // Call Conversational AI Service
+    const aiResult = await conversationalService.processConversationalQuery({
+      query: cleanQuery,
+      conversationHistory: historyMessages,
+      provider,
+      includeWebSearch
+    });
+
+    // Save to Persistent Conversation History if User is Authenticated
+    if (userId) {
+      try {
+        if (!currentConvId) {
+          const convTitle = cleanQuery.length > 45 ? cleanQuery.substring(0, 45) + '...' : cleanQuery;
+          const convRes = await db.query(
+            `INSERT INTO ai_conversations (user_id, title, selected_provider, conversation_type)
+             VALUES ($1, $2, $3, 'PUBLIC_AI_SEARCH') RETURNING id`,
+            [userId, convTitle, aiResult.providerUsed]
+          );
+          currentConvId = convRes.rows[0].id;
+        } else {
+          await db.query(
+            `UPDATE ai_conversations SET updated_at = NOW(), selected_provider = $1 WHERE id = $2`,
+            [aiResult.providerUsed, currentConvId]
+          );
+        }
+
+        // Store User Message
+        await db.query(
+          `INSERT INTO ai_messages (conversation_id, sender, content, provider)
+           VALUES ($1, 'user', $2, $3)`,
+          [currentConvId, cleanQuery, aiResult.providerUsed]
+        );
+
+        // Store Assistant Response with Citations
+        await db.query(
+          `INSERT INTO ai_messages (conversation_id, sender, content, provider, citations, grounding)
+           VALUES ($1, 'assistant', $2, $3, $4, $5)`,
+          [
+            currentConvId,
+            aiResult.answer,
+            aiResult.providerUsed,
+            JSON.stringify(aiResult.sources || []),
+            aiResult.sourceClassification
+          ]
+        );
+      } catch (histDbErr) {
+        console.warn('[PublicSearch] Persistent AI conversation storage warning:', histDbErr.message);
+      }
+    }
+
+    res.json({
+      conversationId: currentConvId,
+      query: cleanQuery,
+      answer: aiResult.answer,
+      sourceClassification: aiResult.sourceClassification,
+      citationDisclaimer: aiResult.citationDisclaimer,
+      sources: aiResult.sources,
+      providerUsed: aiResult.providerUsed
+    });
+  } catch (error) {
+    console.error('AI chat processing error:', error);
+    res.status(500).json({ message: error.message || 'Error processing AI question.' });
+  }
+};
+
+/**
+ * 4. SEARCH HISTORY: Normal Search Queries
+ */
+exports.getNormalSearchHistory = async (req, res) => {
+  const userId = req.user.id;
+  try {
+    const result = await db.query(
+      `SELECT id, query, search_mode, result_count, created_at
+       FROM search_history
+       WHERE user_id = $1
+       ORDER BY created_at DESC
+       LIMIT 50`,
+      [userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Get normal search history error:', err);
+    res.status(500).json({ message: 'Failed to retrieve search history.' });
+  }
+};
+
+exports.deleteNormalSearchHistoryItem = async (req, res) => {
+  const userId = req.user.id;
+  const { id } = req.params;
+  try {
+    const delRes = await db.query(`DELETE FROM search_history WHERE id = $1 AND user_id = $2 RETURNING id`, [id, userId]);
+    if (delRes.rowCount === 0) {
+      return res.status(404).json({ message: 'Search history item not found or unauthorized.' });
+    }
+    res.json({ success: true, message: 'Search history item deleted.' });
+  } catch (err) {
+    console.error('Delete search history item error:', err);
+    res.status(500).json({ message: 'Failed to delete search history item.' });
+  }
+};
+
+exports.clearNormalSearchHistory = async (req, res) => {
+  const userId = req.user.id;
+  try {
+    await db.query(`DELETE FROM search_history WHERE user_id = $1`, [userId]);
+    res.json({ success: true, message: 'Normal search history cleared.' });
+  } catch (err) {
+    console.error('Clear search history error:', err);
+    res.status(500).json({ message: 'Failed to clear search history.' });
+  }
+};
+
+/**
+ * 5. SEARCH HISTORY: AI Search Conversations
+ */
+exports.getAiConversations = async (req, res) => {
+  const userId = req.user.id;
+  try {
+    const result = await db.query(
+      `SELECT id, title, selected_provider, created_at, updated_at
+       FROM ai_conversations
+       WHERE user_id = $1 AND conversation_type = 'PUBLIC_AI_SEARCH'
+       ORDER BY updated_at DESC
+       LIMIT 50`,
+      [userId]
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Get AI conversations error:', err);
+    res.status(500).json({ message: 'Failed to retrieve AI conversations.' });
+  }
+};
+
+exports.getAiConversationDetails = async (req, res) => {
+  const userId = req.user.id;
+  const { id } = req.params;
+
+  try {
+    const convRes = await db.query(
+      `SELECT * FROM ai_conversations WHERE id = $1 AND user_id = $2`,
+      [id, userId]
+    );
+
+    if (convRes.rowCount === 0) {
+      return res.status(404).json({ message: 'Conversation not found or access denied.' });
+    }
+
+    const messagesRes = await db.query(
+      `SELECT id, sender, content, provider, citations, grounding, created_at
+       FROM ai_messages
+       WHERE conversation_id = $1
+       ORDER BY created_at ASC`,
+      [id]
+    );
+
+    res.json({
+      conversation: convRes.rows[0],
+      messages: messagesRes.rows
+    });
+  } catch (err) {
+    console.error('Get conversation details error:', err);
+    res.status(500).json({ message: 'Failed to retrieve conversation details.' });
+  }
+};
+
+exports.deleteAiConversation = async (req, res) => {
+  const userId = req.user.id;
+  const { id } = req.params;
+
+  try {
+    const delRes = await db.query(
+      `DELETE FROM ai_conversations WHERE id = $1 AND user_id = $2 RETURNING id`,
+      [id, userId]
+    );
+    if (delRes.rowCount === 0) {
+      return res.status(404).json({ message: 'Conversation not found or unauthorized.' });
+    }
+    res.json({ success: true, message: 'Conversation deleted.' });
+  } catch (err) {
+    console.error('Delete AI conversation error:', err);
+    res.status(500).json({ message: 'Failed to delete conversation.' });
+  }
+};
+
+exports.clearAiConversations = async (req, res) => {
+  const userId = req.user.id;
+  try {
+    await db.query(
+      `DELETE FROM ai_conversations WHERE user_id = $1 AND conversation_type = 'PUBLIC_AI_SEARCH'`,
+      [userId]
+    );
+    res.json({ success: true, message: 'All AI conversations cleared.' });
+  } catch (err) {
+    console.error('Clear AI conversations error:', err);
+    res.status(500).json({ message: 'Failed to clear conversations.' });
   }
 };

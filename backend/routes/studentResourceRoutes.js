@@ -14,7 +14,8 @@ const {
   getSignedUrl,
   viewResource,
   downloadResource,
-  deleteResource
+  deleteResource,
+  togglePublicStatus
 } = require('../controllers/studentResourceController');
 
 const anyAuthenticated = authMiddleware;
@@ -27,7 +28,7 @@ router.post('/check-duplicate', anyAuthenticated, checkDuplicate);
 // Upload resource (Students & Faculty)
 router.post('/upload', anyAuthenticated, upload.single('file'), uploadResource);
 
-// Get approved resources (Students, Faculty, HOD)
+// Get approved resources (Students, Faculty, HOD, Public)
 router.get('/', anyAuthenticated, getApprovedResources);
 
 // Get user's own submissions/uploads (Students & Faculty)
@@ -39,6 +40,7 @@ router.get('/approvals', anyAuthenticated, facultyOrAbove, getPendingApprovals);
 // Approve / Reject actions
 router.put('/:id/approve', anyAuthenticated, facultyOrAbove, approveResource);
 router.put('/:id/reject', anyAuthenticated, facultyOrAbove, rejectResource);
+router.put('/:id/toggle-public', anyAuthenticated, facultyOrAbove, togglePublicStatus);
 
 // Preview & Download
 router.get('/:id/signed-url', anyAuthenticated, getSignedUrl);
