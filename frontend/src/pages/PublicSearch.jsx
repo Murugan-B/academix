@@ -41,6 +41,7 @@ export default function PublicSearch() {
   const [normalHistoryList, setNormalHistoryList] = useState([]);
   const [aiHistoryList, setAiHistoryList] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyError, setHistoryError] = useState(null);
 
   const userStr = localStorage.getItem('user');
   const token = localStorage.getItem('token');
@@ -56,6 +57,13 @@ export default function PublicSearch() {
     fetchFeaturedResources();
   }, []);
 
+  // Fetch search history whenever drawer is opened
+  useEffect(() => {
+    if (showHistoryDrawer && user) {
+      fetchSearchHistory();
+    }
+  }, [showHistoryDrawer]);
+
   const fetchFeaturedResources = async () => {
     try {
       const res = await api.get('/public/featured-resources');
@@ -69,15 +77,17 @@ export default function PublicSearch() {
   const fetchSearchHistory = async () => {
     if (!user) return;
     setHistoryLoading(true);
+    setHistoryError(null);
     try {
       const [normRes, aiRes] = await Promise.all([
-        api.get('/public/history/normal').catch(() => ({ data: [] })),
-        api.get('/public/history/ai-conversations').catch(() => ({ data: [] }))
+        api.get('/public/history/normal'),
+        api.get('/public/history/ai-conversations')
       ]);
-      setNormalHistoryList(normRes.data || []);
-      setAiHistoryList(aiRes.data || []);
+      setNormalHistoryList(Array.isArray(normRes.data) ? normRes.data : []);
+      setAiHistoryList(Array.isArray(aiRes.data) ? aiRes.data : []);
     } catch (err) {
       console.warn('Failed to fetch history:', err.message);
+      setHistoryError(err.response?.data?.message || err.message || 'Unable to retrieve search history. Please check your connection.');
     } finally {
       setHistoryLoading(false);
     }
@@ -1018,6 +1028,17 @@ export default function PublicSearch() {
             <div className="flex-1 p-5 overflow-y-auto space-y-2.5 custom-scrollbar">
               {historyLoading ? (
                 <div className="py-12 text-center text-xs text-slate-400">Loading history...</div>
+              ) : historyError ? (
+                <div className="py-12 text-center space-y-3 px-4">
+                  <p className="text-xs text-rose-500 font-medium">{historyError}</p>
+                  <button
+                    type="button"
+                    onClick={fetchSearchHistory}
+                    className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-600 text-xs font-bold rounded-lg transition-colors cursor-pointer"
+                  >
+                    Retry Loading History
+                  </button>
+                </div>
               ) : historyTab === 'normal' ? (
                 normalHistoryList.length === 0 ? (
                   <p className="text-xs text-slate-400 text-center py-12">No normal searches recorded yet.</p>

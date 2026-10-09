@@ -15,7 +15,8 @@ function createMockReqRes({ user = null, query = {}, params = {}, body = {}, hea
         params,
         body,
         headers,
-        get: (header) => headers[header.toLowerCase()] || headers[header]
+        get: (h) => headers[h.toLowerCase()] || headers[h],
+        header: (h) => headers[h.toLowerCase()] || headers[h]
     };
     const res = {
         statusCode: 200,
@@ -313,7 +314,53 @@ async function runTests() {
         // =====================================================================
         // TEST SUITE 4: PERSISTENT SEARCH & CHAT HISTORY CRUD AND SECURITY
         // =====================================================================
-        console.log('--- TEST SUITE 4: PERSISTENT HISTORY SECURITY & OWNERSHIP ---');
+        console.log('--- TEST SUITE 4: PERSISTENT HISTORY SECURITY, ROUTING & OWNERSHIP ---');
+
+        const authMiddleware = require('./middlewares/authMiddleware');
+        const publicRoutes = require('./routes/publicRoutes');
+
+        // 4.0 Route Registration Verification
+        {
+            const registeredRoutes = publicRoutes.stack
+                .filter(layer => layer.route)
+                .map(layer => ({
+                    path: layer.route.path,
+                    methods: Object.keys(layer.route.methods).map(m => m.toUpperCase())
+                }));
+
+            const hasNormalHistoryGet = registeredRoutes.some(r => r.path === '/history/normal' && r.methods.includes('GET'));
+            const hasNormalHistoryDelId = registeredRoutes.some(r => r.path === '/history/normal/:id' && r.methods.includes('DELETE'));
+            const hasNormalHistoryDelAll = registeredRoutes.some(r => r.path === '/history/normal' && r.methods.includes('DELETE'));
+            const hasAiConversationsGet = registeredRoutes.some(r => r.path === '/history/ai-conversations' && r.methods.includes('GET'));
+            const hasAiConversationsGetId = registeredRoutes.some(r => r.path === '/history/ai-conversations/:id' && r.methods.includes('GET'));
+            const hasAiConversationsDelId = registeredRoutes.some(r => r.path === '/history/ai-conversations/:id' && r.methods.includes('DELETE'));
+            const hasAiConversationsDelAll = registeredRoutes.some(r => r.path === '/history/ai-conversations' && r.methods.includes('DELETE'));
+
+            assert(hasNormalHistoryGet === true, 'Route GET /api/public/history/normal is registered');
+            assert(hasNormalHistoryDelId === true, 'Route DELETE /api/public/history/normal/:id is registered');
+            assert(hasNormalHistoryDelAll === true, 'Route DELETE /api/public/history/normal is registered');
+            assert(hasAiConversationsGet === true, 'Route GET /api/public/history/ai-conversations is registered');
+            assert(hasAiConversationsGetId === true, 'Route GET /api/public/history/ai-conversations/:id is registered');
+            assert(hasAiConversationsDelId === true, 'Route DELETE /api/public/history/ai-conversations/:id is registered');
+            assert(hasAiConversationsDelAll === true, 'Route DELETE /api/public/history/ai-conversations is registered');
+        }
+
+        // 4.0.1 Authentication Middleware Rejection (401 when no token)
+        {
+            const { req, res } = createMockReqRes({ headers: {} });
+            let nextCalled = false;
+            authMiddleware(req, res, () => { nextCalled = true; });
+            assert(res.statusCode === 401, 'Unauthenticated history request without token rejected with 401');
+            assert(nextCalled === false, 'Next handler not invoked on unauthenticated request');
+        }
+
+        // 4.0.2 Empty History State Handling (Returns 200 and empty array for new user)
+        {
+            const { req, res } = createMockReqRes({ user: attackerUser }); // user has 0 searches
+            await publicController.getNormalSearchHistory(req, res);
+            assert(res.statusCode === 200, 'getNormalSearchHistory returns 200 for user with no searches');
+            assert(Array.isArray(res.responseData) && res.responseData.length === 0, 'New user receives clean empty array [] (not 404 or error)');
+        }
 
         let createdSearchHistoryId = null;
         let createdConversationId = null;

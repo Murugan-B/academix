@@ -13,6 +13,7 @@ class ConversationalService {
       'gemini-3.5-flash-lite',
       'gemini-3.8-flash'
     ];
+    this.geminiQuotaExhaustedUntil = 0;
   }
 
   /**
@@ -23,10 +24,13 @@ class ConversationalService {
       throw new Error('GEMINI_API_KEY is not configured in the backend environment.');
     }
 
+    if (Date.now() < this.geminiQuotaExhaustedUntil) {
+      throw new Error('Gemini quota is currently exhausted. Skipping to OpenRouter fallback.');
+    }
+
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     let lastError = null;
 
-    // Convert messages to Gemini format
     const contents = messages.map(m => ({
       role: m.role === 'assistant' ? 'model' : 'user',
       parts: [{ text: m.content }]
@@ -47,10 +51,15 @@ class ConversationalService {
       } catch (err) {
         lastError = err;
         const msg = err.message || String(err);
-        console.warn(`[ConversationalAI] Gemini model "${model}" notice (${i + 1}/${this.candidateGeminiModels.length}): ${msg}`);
-        if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('429') || msg.includes('Quota exceeded')) {
+        
+        if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('429') || msg.includes('Quota exceeded') || msg.includes('rate-limits')) {
+          // Cooldown for 15 minutes before retrying Gemini to avoid repeated failing network requests
+          this.geminiQuotaExhaustedUntil = Date.now() + 15 * 60 * 1000;
+          console.warn(`[ConversationalAI] Gemini quota exhausted on model "${model}". Setting 15m cooldown and switching to OpenRouter.`);
           break;
         }
+
+        console.warn(`[ConversationalAI] Gemini model "${model}" notice (${i + 1}/${this.candidateGeminiModels.length}): ${msg}`);
         if (i < this.candidateGeminiModels.length - 1) {
           await new Promise(r => setTimeout(r, 200));
           continue;
@@ -61,7 +70,7 @@ class ConversationalService {
   }
 
   /**
-   * Execute chat completion via OpenRouter API
+   * Execute chat completion via OpenRouter API with multi-model failover
    */
   async _callOpenRouter(systemPrompt, messages) {
     const apiKey = process.env.OPENROUTER_API_KEY;
@@ -77,31 +86,55 @@ class ConversationalService {
       }))
     ];
 
-    const modelToUse = process.env.OPENROUTER_MODEL || 'openrouter/auto';
+    const modelsToTry = [
+      process.env.OPENROUTER_MODEL,
+      'openrouter/auto',
+      'qwen/qwen-2.5-72b-instruct',
+      'meta-llama/llama-3.3-70b-instruct:free',
+      'google/gemini-2.5-flash'
+    ].filter(Boolean);
 
-    const response = await axios.post(
-      'https://openrouter.ai/api/v1/chat/completions',
-      {
-        model: modelToUse,
-        messages: payloadMessages,
-        temperature: 0.7
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://academix.edu',
-          'X-Title': 'Academix Global Assistant'
-        },
-        timeout: 25000
+    // Remove duplicates while preserving priority
+    const candidateModels = Array.from(new Set(modelsToTry));
+    let lastError = null;
+
+    for (let i = 0; i < candidateModels.length; i++) {
+      const model = candidateModels[i];
+      try {
+        const response = await axios.post(
+          'https://openrouter.ai/api/v1/chat/completions',
+          {
+            model,
+            messages: payloadMessages,
+            temperature: 0.7
+          },
+          {
+            headers: {
+              'Authorization': `Bearer ${apiKey}`,
+              'Content-Type': 'application/json',
+              'HTTP-Referer': 'https://academix.edu',
+              'X-Title': 'Academix Global Assistant'
+            },
+            timeout: 25000
+          }
+        );
+
+        let answer = response.data?.choices?.[0]?.message?.content;
+        if (Array.isArray(answer)) {
+          answer = answer.map(p => p.text || '').join('\n');
+        }
+
+        if (typeof answer === 'string' && answer.trim().length > 0) {
+          return answer.trim();
+        }
+      } catch (err) {
+        lastError = err;
+        const msg = err.response?.data?.error?.message || err.message;
+        console.warn(`[ConversationalAI] OpenRouter model "${model}" notice (${i + 1}/${candidateModels.length}): ${msg}`);
       }
-    );
-
-    const answer = response.data?.choices?.[0]?.message?.content;
-    if (!answer) {
-      throw new Error('OpenRouter returned an empty response.');
     }
-    return answer;
+
+    throw lastError || new Error('All OpenRouter candidate models failed to return a response.');
   }
 
   /**
@@ -209,12 +242,15 @@ ${retrievedContext ? retrievedContext : '\n[Note: Answering using Academix Gener
       content: m.content || m.text || ''
     })).filter(m => Boolean(m.content.trim()));
 
-    // Append current user query
     sanitizedHistory.push({ role: 'user', content: cleanQuery });
 
-    // 5. Execute LLM generation with primary & fallback providers
-    let answer = '';
+    // 5. Determine initial provider (skip Gemini directly if quota cooldown is active)
     let usedProvider = provider || 'gemini';
+    if (usedProvider === 'gemini' && Date.now() < this.geminiQuotaExhaustedUntil) {
+      usedProvider = 'openrouter';
+    }
+
+    let answer = '';
 
     try {
       if (usedProvider === 'openrouter') {
@@ -223,7 +259,7 @@ ${retrievedContext ? retrievedContext : '\n[Note: Answering using Academix Gener
         answer = await this._callGemini(systemPrompt, sanitizedHistory);
       }
     } catch (primaryErr) {
-      console.warn(`[ConversationalAI] Provider "${usedProvider}" failed, attempting automatic fallback:`, primaryErr.message);
+      console.warn(`[ConversationalAI] Primary provider "${usedProvider}" failed: ${primaryErr.message}. Attempting automatic fallback...`);
       const fallbackProvider = usedProvider === 'gemini' ? 'openrouter' : 'gemini';
       try {
         if (fallbackProvider === 'openrouter') {
@@ -233,7 +269,15 @@ ${retrievedContext ? retrievedContext : '\n[Note: Answering using Academix Gener
         }
         usedProvider = fallbackProvider;
       } catch (fallbackErr) {
-        throw new Error(`AI assistant is currently experiencing high load. Please try again in a moment. (${primaryErr.message})`);
+        console.error(`[ConversationalAI] Both providers failed: ${fallbackErr.message}`);
+        return {
+          query: cleanQuery,
+          answer: "I apologize, but our AI services are currently experiencing temporary high volume or provider rate limits. Please try asking again in a few moments, or explore our Global Web & Public Resources Search for instant references.",
+          sourceClassification: 'SERVICE_NOTICE',
+          citationDisclaimer: 'AI service temporarily experiencing high traffic.',
+          sources: [],
+          providerUsed: 'fallback-notice'
+        };
       }
     }
 
