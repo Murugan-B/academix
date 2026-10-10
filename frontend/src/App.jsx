@@ -4,6 +4,7 @@ import Login from './pages/Login';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import PublicSearch from './pages/PublicSearch';
+import MyHub from './pages/MyHub';
 import UsersAndRoles from './pages/UsersAndRoles';
 import Settings from './pages/Settings';
 import Subjects from './pages/Subjects';
@@ -35,6 +36,8 @@ function App() {
         <Route path="/register" element={<Register />} />
         <Route path="/forgot-password" element={<ForgotPassword />} />
         <Route path="/public-search" element={<PublicSearch />} />
+        <Route path="/my-hub" element={<MyHub />} />
+        <Route path="/public-hub" element={<MyHub />} />
         
         {/* Protected Dashboard & Application Workspace */}
         <Route element={<Layout />}>

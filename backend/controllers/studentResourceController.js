@@ -172,14 +172,16 @@ exports.uploadResource = async (req, res) => {
         }
 
         try {
+          const isPublic = (req.body.is_public === 'true' || req.body.is_public === true);
+
           const insertRes = await db.query(`
             INSERT INTO student_resources (
               title, description, tags, department_id, semester, subject_id,
               unit_id, lesson_id, topic_id, file_name, file_url,
               cloudinary_public_id, file_type, file_size, file_hash,
-              source_type, status, uploaded_by, approved_at
+              source_type, status, is_public, uploaded_by, approved_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
             RETURNING *
           `, [
             title.trim(),
@@ -199,6 +201,7 @@ exports.uploadResource = async (req, res) => {
             fileHash,
             sourceType,
             status,
+            isPublic,
             uploaded_by,
             isFacultyUpload ? new Date() : null
           ]);

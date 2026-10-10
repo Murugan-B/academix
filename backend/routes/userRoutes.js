@@ -22,7 +22,7 @@ router.post('/assign-mentor', authMiddleware, roleMiddleware(['HOD']), assignMen
 router.post('/student', authMiddleware, roleMiddleware(['HOD', 'FACULTY']), addStudent);
 router.get('/mentees', authMiddleware, roleMiddleware(['FACULTY']), getMentees);
 router.get('/student', authMiddleware, roleMiddleware(['HOD', 'FACULTY', 'INSTITUTE_ADMIN']), getStudents);
-router.get('/student/:id', authMiddleware, roleMiddleware(['HOD', 'FACULTY', 'INSTITUTE_ADMIN', 'SUPER_ADMIN']), getStudent);
+router.get('/student/:id', authMiddleware, roleMiddleware(['HOD', 'FACULTY', 'INSTITUTE_ADMIN', 'SUPER_ADMIN', 'STUDENT']), getStudent);
 router.get('/mentors', authMiddleware, roleMiddleware(['HOD', 'FACULTY', 'INSTITUTE_ADMIN', 'SUPER_ADMIN', 'STUDENT']), getMentors);
 router.get('/institute-admins', authMiddleware, roleMiddleware(['SUPER_ADMIN']), getInstituteAdmins);
 

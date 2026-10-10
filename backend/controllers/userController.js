@@ -136,6 +136,9 @@ exports.getInstituteAdmins = async (req, res) => {
 // Get single student profile
 exports.getStudent = async (req, res) => {
   const student_id = req.params.id;
+  if (req.user.role === 'STUDENT' && req.user.id !== student_id) {
+    return res.status(403).json({ error: 'You do not have permission to view other student profiles' });
+  }
   try {
     const result = await db.query(
       `SELECT u.id, u.name, u.email, u.roll_number, u.batch_start_year, u.batch_end_year, 

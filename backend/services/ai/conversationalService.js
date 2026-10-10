@@ -2,7 +2,9 @@ const { GoogleGenAI } = require('@google/genai');
 const axios = require('axios');
 const db = require('../../db');
 const { searchWeb } = require('../search/searchService');
-const { classifyQuery, retrieveCurrentInformation, formatCurrentContextBlock } = require('./freshnessService');
+const { classifyQuery } = require('./freshnessService');
+const pdfParse = require('pdf-parse');
+const mammoth = require('mammoth');
 
 class ConversationalService {
   constructor() {
@@ -17,9 +19,43 @@ class ConversationalService {
   }
 
   /**
-   * Execute chat completion via Gemini SDK with candidate model fallback
+   * Helper: Extract text from document buffer (PDF, DOCX, TXT)
    */
-  async _callGemini(systemPrompt, messages) {
+  async extractDocumentText(buffer, originalname, mimetype) {
+    if (!buffer) return '';
+    const ext = (originalname || '').split('.').pop().toLowerCase();
+    
+    try {
+      if (mimetype === 'application/pdf' || ext === 'pdf') {
+        const data = await pdfParse(buffer);
+        return data.text || '';
+      }
+      
+      if (
+        mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' ||
+        ext === 'docx'
+      ) {
+        const result = await mammoth.extractRawText({ buffer });
+        return result.value || '';
+      }
+
+      if (
+        mimetype.startsWith('text/') ||
+        ['txt', 'csv', 'md', 'json', 'js', 'py', 'java', 'cpp', 'c', 'html', 'css'].includes(ext)
+      ) {
+        return buffer.toString('utf-8');
+      }
+    } catch (err) {
+      console.warn('[ConversationalAI] Document text extraction warning:', err.message);
+    }
+    return '';
+  }
+
+  /**
+   * Execute chat completion via Gemini SDK with candidate model fallback
+   * Supports Multimodal Image Understanding
+   */
+  async _callGemini(systemPrompt, messages, imageAttachment = null) {
     if (!process.env.GEMINI_API_KEY) {
       throw new Error('GEMINI_API_KEY is not configured in the backend environment.');
     }
@@ -31,10 +67,24 @@ class ConversationalService {
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     let lastError = null;
 
-    const contents = messages.map(m => ({
-      role: m.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: m.content }]
-    }));
+    const contents = messages.map((m, idx) => {
+      const isLastUserMsg = (idx === messages.length - 1) && (m.role === 'user');
+      const parts = [{ text: m.content }];
+
+      if (isLastUserMsg && imageAttachment && imageAttachment.data && imageAttachment.mimeType) {
+        parts.push({
+          inlineData: {
+            mimeType: imageAttachment.mimeType,
+            data: imageAttachment.data
+          }
+        });
+      }
+
+      return {
+        role: m.role === 'assistant' ? 'model' : 'user',
+        parts
+      };
+    });
 
     for (let i = 0; i < this.candidateGeminiModels.length; i++) {
       const model = this.candidateGeminiModels[i];
@@ -71,8 +121,9 @@ class ConversationalService {
 
   /**
    * Execute chat completion via OpenRouter API with multi-model failover
+   * Supports Multimodal Vision Models
    */
-  async _callOpenRouter(systemPrompt, messages) {
+  async _callOpenRouter(systemPrompt, messages, imageAttachment = null) {
     const apiKey = process.env.OPENROUTER_API_KEY;
     if (!apiKey) {
       throw new Error('OPENROUTER_API_KEY is not configured in the backend environment.');
@@ -80,19 +131,48 @@ class ConversationalService {
 
     const payloadMessages = [
       { role: 'system', content: systemPrompt },
-      ...messages.map(m => ({
-        role: m.role === 'assistant' ? 'assistant' : 'user',
-        content: m.content
-      }))
+      ...messages.map((m, idx) => {
+        const isLastUserMsg = (idx === messages.length - 1) && (m.role === 'user');
+        
+        if (isLastUserMsg && imageAttachment && imageAttachment.data && imageAttachment.mimeType) {
+          return {
+            role: 'user',
+            content: [
+              { type: 'text', text: m.content },
+              {
+                type: 'image_url',
+                image_url: {
+                  url: `data:${imageAttachment.mimeType};base64,${imageAttachment.data}`
+                }
+              }
+            ]
+          };
+        }
+
+        return {
+          role: m.role === 'assistant' ? 'assistant' : 'user',
+          content: m.content
+        };
+      })
     ];
 
-    const modelsToTry = [
-      process.env.OPENROUTER_MODEL,
-      'openrouter/auto',
-      'qwen/qwen-2.5-72b-instruct',
-      'meta-llama/llama-3.3-70b-instruct:free',
-      'google/gemini-2.5-flash'
-    ].filter(Boolean);
+    // Select candidate models based on whether vision is required
+    const modelsToTry = imageAttachment
+      ? [
+          process.env.OPENROUTER_VISION_MODEL,
+          'openrouter/auto',
+          'google/gemini-2.0-flash-001',
+          'meta-llama/llama-3.2-11b-vision-instruct',
+          'qwen/qwen-2-vl-72b-instruct',
+          'openai/gpt-4o-mini'
+        ].filter(Boolean)
+      : [
+          process.env.OPENROUTER_MODEL,
+          'openrouter/auto',
+          'qwen/qwen-2.5-72b-instruct',
+          'meta-llama/llama-3.3-70b-instruct:free',
+          'google/gemini-2.5-flash'
+        ].filter(Boolean);
 
     // Remove duplicates while preserving priority
     const candidateModels = Array.from(new Set(modelsToTry));
@@ -115,7 +195,7 @@ class ConversationalService {
               'HTTP-Referer': 'https://academix.edu',
               'X-Title': 'Academix Global Assistant'
             },
-            timeout: 25000
+            timeout: 30000
           }
         );
 
@@ -139,27 +219,71 @@ class ConversationalService {
 
   /**
    * Main Conversational Query Processor
+   * Supports Text, Document Attachments (PDF, DOCX, TXT), and Multimodal Images (JPG, PNG, WEBP)
    */
   async processConversationalQuery({
     query,
     conversationHistory = [],
     provider = 'gemini',
-    includeWebSearch = true
+    includeWebSearch = true,
+    fileBuffer = null,
+    fileName = null,
+    fileMimeType = null,
+    fileBase64 = null
   }) {
     if (!query || typeof query !== 'string' || !query.trim()) {
       throw new Error('User query is required.');
     }
 
     const cleanQuery = query.trim();
-    const queryClassification = classifyQuery(cleanQuery, false);
+    classifyQuery(cleanQuery, false);
 
     let retrievedContext = '';
     let sources = [];
     let sourceClassification = 'GENERAL_AI_KNOWLEDGE';
     let citationDisclaimer = 'Synthesized from Academix General Academic Knowledge base.';
+    let imageAttachment = null;
+    let documentContext = '';
 
-    // 1. Check if user requested web search or query is time-sensitive
-    if (includeWebSearch) {
+    // A. Handle Attachment Processing
+    if (fileBuffer || fileBase64) {
+      const mime = (fileMimeType || '').toLowerCase();
+      const name = fileName || 'uploaded_document';
+      const isImage = mime.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp', 'gif', 'bmp'].some(ext => name.toLowerCase().endsWith('.' + ext));
+
+      if (isImage) {
+        const base64Data = fileBase64 || (fileBuffer ? fileBuffer.toString('base64') : '');
+        if (base64Data) {
+          imageAttachment = {
+            mimeType: mime || 'image/png',
+            data: base64Data,
+            fileName: name
+          };
+          sourceClassification = 'IMAGE_ANALYSIS';
+          citationDisclaimer = `Multimodal visual analysis of attached image "${name}".`;
+        }
+      } else {
+        // Document extraction (PDF, DOCX, TXT)
+        let extractedText = '';
+        if (fileBuffer) {
+          extractedText = await this.extractDocumentText(fileBuffer, name, mime);
+        } else if (fileBase64) {
+          const buf = Buffer.from(fileBase64, 'base64');
+          extractedText = await this.extractDocumentText(buf, name, mime);
+        }
+
+        if (extractedText && extractedText.trim().length > 0) {
+          // Truncate to reasonable context window (~15,000 chars)
+          const safeText = extractedText.trim().slice(0, 15000);
+          documentContext = `\n=== USER ATTACHED DOCUMENT: "${name}" ===\n${safeText}\n\nINSTRUCTIONS FOR DOCUMENT: Analyze the document content above and directly address the user query regarding it. Provide clear, accurate, and comprehensive academic explanations.`;
+          sourceClassification = 'DOCUMENT_GROUNDED';
+          citationDisclaimer = `Grounded in attached document "${name}".`;
+        }
+      }
+    }
+
+    // B. Check if user requested web search (and no conflicting heavy document context)
+    if (includeWebSearch && !documentContext && !imageAttachment) {
       try {
         const webData = await searchWeb({ query: cleanQuery, searchType: 'web', limit: 4 });
         if (webData.results && webData.results.length > 0) {
@@ -182,8 +306,8 @@ class ConversationalService {
       } catch (searchErr) {
         console.warn('[ConversationalAI] Live web search grounding notice:', searchErr.message);
       }
-    } else {
-      // 2. Search ONLY strictly public approved academic resources (is_public = TRUE AND status = 'APPROVED')
+    } else if (!includeWebSearch && !documentContext && !imageAttachment) {
+      // Search ONLY strictly public approved academic resources (is_public = TRUE AND status = 'APPROVED')
       try {
         const searchTerm = `%${cleanQuery}%`;
         const publicDocsRes = await db.query(
@@ -217,26 +341,26 @@ class ConversationalService {
       }
     }
 
-    // 3. Build System Prompt for friendly, pedagogical, grounded conversational AI
+    // C. Build System Prompt for friendly, pedagogical, grounded conversational AI
     const systemPrompt = `You are Academix AI, an intelligent, helpful, and friendly academic assistant.
 
 CORE PRINCIPLES:
 1. Provide comprehensive, accurate, and pedagogical answers to general academic, technical, programming, scientific, and knowledge questions.
-2. NEVER say "I couldn't find this information in the selected material" when answering general domain questions. Use your broad knowledge base to explain concepts thoroughly with clear definitions, examples, formulas, and code blocks.
-3. When Context is provided below:
-   - If Web context is provided, ground your answer in the verified web facts and reference sources.
-   - If Public Academic Resource context is provided, reference the public note topics.
-4. Format all responses with clean GitHub-flavored Markdown:
+2. If an image or diagram is provided, perform deep visual analysis: examine circuits, code snippets, graphs, mathematical problems, charts, and handwritten questions, and explain or solve them step-by-step.
+3. If an attached document is provided, read and analyze its content thoroughly to answer summaries, MCQs, or conceptual questions.
+4. NEVER say "I couldn't find this information in the selected material" when answering general domain questions. Use your broad knowledge base to explain concepts thoroughly with clear definitions, examples, formulas, and code blocks.
+5. Format all responses with clean GitHub-flavored Markdown:
    - Use ## and ### for headings.
    - Use bullet points and bold key technical terms.
    - Use fenced code blocks with language tags (e.g. \`\`\`python, \`\`\`cpp) for code.
    - Use LaTeX / clean mathematical formatting for equations.
-5. If the user asks a follow-up question, maintain context from the previous conversation turns.
+6. If the user asks a follow-up question, maintain context from previous conversation turns.
 
-${retrievedContext ? retrievedContext : '\n[Note: Answering using Academix General Knowledge Base. No internal institutional material was retrieved.]'}
+${documentContext ? documentContext : ''}
+${retrievedContext ? retrievedContext : (!documentContext && !imageAttachment ? '\n[Note: Answering using Academix General Knowledge Base. No internal institutional material was retrieved.]' : '')}
 `;
 
-    // 4. Construct messages history
+    // D. Construct messages history
     const sanitizedHistory = (conversationHistory || []).map(m => ({
       role: m.role === 'assistant' || m.sender === 'assistant' ? 'assistant' : 'user',
       content: m.content || m.text || ''
@@ -244,7 +368,7 @@ ${retrievedContext ? retrievedContext : '\n[Note: Answering using Academix Gener
 
     sanitizedHistory.push({ role: 'user', content: cleanQuery });
 
-    // 5. Determine initial provider (skip Gemini directly if quota cooldown is active)
+    // E. Determine initial provider (skip Gemini directly if quota cooldown is active)
     let usedProvider = provider || 'gemini';
     if (usedProvider === 'gemini' && Date.now() < this.geminiQuotaExhaustedUntil) {
       usedProvider = 'openrouter';
@@ -254,18 +378,18 @@ ${retrievedContext ? retrievedContext : '\n[Note: Answering using Academix Gener
 
     try {
       if (usedProvider === 'openrouter') {
-        answer = await this._callOpenRouter(systemPrompt, sanitizedHistory);
+        answer = await this._callOpenRouter(systemPrompt, sanitizedHistory, imageAttachment);
       } else {
-        answer = await this._callGemini(systemPrompt, sanitizedHistory);
+        answer = await this._callGemini(systemPrompt, sanitizedHistory, imageAttachment);
       }
     } catch (primaryErr) {
       console.warn(`[ConversationalAI] Primary provider "${usedProvider}" failed: ${primaryErr.message}. Attempting automatic fallback...`);
       const fallbackProvider = usedProvider === 'gemini' ? 'openrouter' : 'gemini';
       try {
         if (fallbackProvider === 'openrouter') {
-          answer = await this._callOpenRouter(systemPrompt, sanitizedHistory);
+          answer = await this._callOpenRouter(systemPrompt, sanitizedHistory, imageAttachment);
         } else {
-          answer = await this._callGemini(systemPrompt, sanitizedHistory);
+          answer = await this._callGemini(systemPrompt, sanitizedHistory, imageAttachment);
         }
         usedProvider = fallbackProvider;
       } catch (fallbackErr) {
@@ -276,7 +400,9 @@ ${retrievedContext ? retrievedContext : '\n[Note: Answering using Academix Gener
           sourceClassification: 'SERVICE_NOTICE',
           citationDisclaimer: 'AI service temporarily experiencing high traffic.',
           sources: [],
-          providerUsed: 'fallback-notice'
+          providerUsed: 'fallback-notice',
+          hasImageAttachment: Boolean(imageAttachment),
+          hasDocumentContext: Boolean(documentContext)
         };
       }
     }
@@ -287,7 +413,9 @@ ${retrievedContext ? retrievedContext : '\n[Note: Answering using Academix Gener
       sourceClassification,
       citationDisclaimer,
       sources,
-      providerUsed: usedProvider
+      providerUsed: usedProvider,
+      hasImageAttachment: Boolean(imageAttachment),
+      hasDocumentContext: Boolean(documentContext)
     };
   }
 }

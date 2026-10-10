@@ -7,7 +7,8 @@ import {
   Layers, Filter, Copy, Check, Info, AlertTriangle, ArrowLeft,
   GraduationCap, Download, Eye, RefreshCw, Image as ImageIcon,
   MessageSquare, Trash2, History, Plus, Send, CornerDownLeft,
-  ChevronRight, X, Clock, ExternalLink as OutLink, User
+  ChevronRight, X, Clock, ExternalLink as OutLink, User,
+  Paperclip, Mic, MicOff, LogOut, FileCheck, AlertCircle
 } from 'lucide-react';
 
 export default function PublicSearch() {
@@ -30,10 +31,19 @@ export default function PublicSearch() {
   const [aiProvider, setAiProvider] = useState('gemini');
   const [includeWebSearch, setIncludeWebSearch] = useState(true);
   const [activeConversationId, setActiveConversationId] = useState(null);
-  const [chatMessages, setChatMessages] = useState([]); // [{ role: 'user'|'assistant', content, citations, grounding, timestamp }]
+  const [chatMessages, setChatMessages] = useState([]); // [{ role: 'user'|'assistant', content, attachment, citations, grounding, timestamp }]
   const [aiInputText, setAiInputText] = useState('');
   const [copiedIdx, setCopiedIdx] = useState(null);
   const chatBottomRef = useRef(null);
+
+  // Multimodal File Attachment State
+  const [selectedFile, setSelectedFile] = useState(null); // { file, name, size, type, isImage, previewUrl }
+  const fileInputRef = useRef(null);
+
+  // Voice Input (Speech Recognition) State
+  const [isRecording, setIsRecording] = useState(false);
+  const [speechError, setSpeechError] = useState(null);
+  const recognitionRef = useRef(null);
 
   // Search History Drawer State
   const [showHistoryDrawer, setShowHistoryDrawer] = useState(false);
@@ -64,6 +74,26 @@ export default function PublicSearch() {
     }
   }, [showHistoryDrawer]);
 
+  // Clean up speech recognition & object URLs on unmount
+  useEffect(() => {
+    return () => {
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {}
+      }
+      if (selectedFile?.previewUrl) {
+        URL.revokeObjectURL(selectedFile.previewUrl);
+      }
+    };
+  }, [selectedFile]);
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    navigate('/login', { replace: true });
+  };
+
   const fetchFeaturedResources = async () => {
     try {
       const res = await api.get('/public/featured-resources');
@@ -87,7 +117,7 @@ export default function PublicSearch() {
       setAiHistoryList(Array.isArray(aiRes.data) ? aiRes.data : []);
     } catch (err) {
       console.warn('Failed to fetch history:', err.message);
-      setHistoryError(err.response?.data?.message || err.message || 'Unable to retrieve search history. Please check your connection.');
+      setHistoryError(err.response?.data?.message || err.message || 'Unable to retrieve search history.');
     } finally {
       setHistoryLoading(false);
     }
@@ -121,30 +151,157 @@ export default function PublicSearch() {
     }
   };
 
-  // Handle Sending a Conversational AI Message
+  // Handle File Selection (Document or Image)
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // 10 MB limit
+    if (file.size > 10 * 1024 * 1024) {
+      alert('File size exceeds 10 MB limit.');
+      return;
+    }
+
+    const isImg = file.type.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif|bmp)$/i.test(file.name);
+    const previewUrl = isImg ? URL.createObjectURL(file) : null;
+
+    setSelectedFile({
+      file,
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      isImage: isImg,
+      previewUrl
+    });
+  };
+
+  const handleRemoveFile = () => {
+    if (selectedFile?.previewUrl) {
+      URL.revokeObjectURL(selectedFile.previewUrl);
+    }
+    setSelectedFile(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Toggle Voice Input (Web Speech API)
+  const toggleVoiceInput = () => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+      setSpeechError('Speech recognition is not supported in this browser. Please use Chrome, Edge, or Safari.');
+      setTimeout(() => setSpeechError(null), 6000);
+      return;
+    }
+
+    if (isRecording) {
+      try {
+        recognitionRef.current?.stop();
+      } catch {}
+      setIsRecording(false);
+      return;
+    }
+
+    try {
+      const recognition = new SpeechRecognition();
+      recognition.continuous = true;
+      recognition.interimResults = true;
+      recognition.lang = 'en-US';
+
+      recognition.onstart = () => {
+        setIsRecording(true);
+        setSpeechError(null);
+      };
+
+      recognition.onresult = (event) => {
+        let transcript = '';
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          transcript += event.results[i][0].transcript;
+        }
+        if (transcript) {
+          setAiInputText(prev => {
+            const cleanPrev = prev.trim();
+            return cleanPrev ? `${cleanPrev} ${transcript}` : transcript;
+          });
+        }
+      };
+
+      recognition.onerror = (event) => {
+        console.warn('Speech recognition notice:', event.error);
+        if (event.error === 'not-allowed') {
+          setSpeechError('Microphone permission was denied. Please allow microphone access.');
+        } else if (event.error !== 'no-speech') {
+          setSpeechError(`Voice input notice: ${event.error}`);
+        }
+        setIsRecording(false);
+        setTimeout(() => setSpeechError(null), 6000);
+      };
+
+      recognition.onend = () => {
+        setIsRecording(false);
+      };
+
+      recognitionRef.current = recognition;
+      recognition.start();
+    } catch (err) {
+      setSpeechError('Could not activate voice recognition.');
+      setIsRecording(false);
+    }
+  };
+
+  // Handle Sending a Conversational AI Message (with Document / Multimodal Image Attachment)
   const handleSendAiMessage = async (e) => {
     if (e) e.preventDefault();
-    if (!aiInputText.trim() || loading) return;
+    if ((!aiInputText.trim() && !selectedFile) || loading) return;
 
-    const userMsgText = aiInputText.trim();
+    // Stop voice recording if still active
+    if (isRecording) {
+      try {
+        recognitionRef.current?.stop();
+      } catch {}
+      setIsRecording(false);
+    }
+
+    const userMsgText = aiInputText.trim() || (selectedFile ? `Please analyze the attached ${selectedFile.isImage ? 'image' : 'document'}.` : '');
+    const currentAttachment = selectedFile ? { ...selectedFile } : null;
+
+    // Clear input fields
     setAiInputText('');
+    handleRemoveFile();
 
     // Append User Message Immediately to UI
     const newUserMsg = {
       role: 'user',
       content: userMsgText,
+      attachment: currentAttachment,
       timestamp: new Date().toISOString()
     };
     setChatMessages(prev => [...prev, newUserMsg]);
     setLoading(true);
 
     try {
-      const res = await api.post('/public/ai-search', {
-        query: userMsgText,
-        conversationId: activeConversationId,
-        provider: aiProvider,
-        includeWebSearch
-      });
+      let res;
+      if (currentAttachment?.file) {
+        // Send Multipart Form Data with File Attachment
+        const formData = new FormData();
+        formData.append('query', userMsgText);
+        if (activeConversationId) formData.append('conversationId', activeConversationId);
+        formData.append('provider', aiProvider);
+        formData.append('includeWebSearch', String(includeWebSearch));
+        formData.append('file', currentAttachment.file);
+
+        res = await api.post('/public/ai-search', formData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+      } else {
+        // Standard JSON Request
+        res = await api.post('/public/ai-search', {
+          query: userMsgText,
+          conversationId: activeConversationId,
+          provider: aiProvider,
+          includeWebSearch
+        });
+      }
 
       if (res.data.conversationId && !activeConversationId) {
         setActiveConversationId(res.data.conversationId);
@@ -169,7 +326,7 @@ export default function PublicSearch() {
     } catch (err) {
       const errorMsg = {
         role: 'assistant',
-        content: `Error: ${err.response?.data?.message || err.message || 'Failed to process question. Please try again.'}`,
+        content: `Service Notice: ${err.response?.data?.message || err.message || 'Failed to process question. Please try asking again.'}`,
         isError: true,
         timestamp: new Date().toISOString()
       };
@@ -184,6 +341,7 @@ export default function PublicSearch() {
     setActiveConversationId(null);
     setChatMessages([]);
     setAiInputText('');
+    handleRemoveFile();
   };
 
   // Load past AI conversation
@@ -201,6 +359,7 @@ export default function PublicSearch() {
         content: m.content,
         citations: typeof m.citations === 'string' ? JSON.parse(m.citations || '[]') : m.citations,
         sourceClassification: m.grounding,
+        providerUsed: m.provider,
         timestamp: m.created_at
       }));
       setChatMessages(formatted);
@@ -264,7 +423,7 @@ export default function PublicSearch() {
   };
 
   const exampleQuestions = [
-    'How does the Dijkstra shortest path algorithm work?',
+    'How does Dijkstra shortest path algorithm work?',
     'Explain difference between process and thread in operating systems',
     'Write a quick Python implementation for Binary Search',
     'What are the core differences between SQL and NoSQL databases?'
@@ -277,7 +436,7 @@ export default function PublicSearch() {
     if (role === 'INSTITUTE_ADMIN') return '/institute-admin';
     if (role === 'HOD') return '/hod';
     if (role === 'FACULTY') return '/faculty';
-    if (role === 'PUBLIC_USER') return '/public-search';
+    if (role === 'PUBLIC_USER') return '/my-hub';
     return '/student';
   };
 
@@ -314,16 +473,27 @@ export default function PublicSearch() {
             )}
 
             {user ? (
-              <div className="flex items-center gap-3">
-                <span className="text-xs font-semibold text-slate-500 hidden md:inline">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-semibold text-slate-600 hidden md:inline">
                   {user.name} <span className="text-[10px] bg-slate-200/70 px-1.5 py-0.5 rounded font-bold uppercase">{user.role}</span>
                 </span>
+                
                 <button
                   onClick={() => navigate(getDashboardRoute())}
-                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5"
+                  className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
                 >
                   <span>{user.role === 'PUBLIC_USER' ? 'My Hub' : 'Dashboard'}</span>
                   <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleLogout}
+                  className="p-1.5 bg-rose-50 hover:bg-rose-100 text-rose-600 border border-rose-200/60 rounded-xl transition-all flex items-center gap-1 cursor-pointer"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-4 h-4" />
+                  <span className="hidden lg:inline text-xs font-bold pr-1">Sign Out</span>
                 </button>
               </div>
             ) : (
@@ -376,7 +546,7 @@ export default function PublicSearch() {
             >
               <Bot className="w-4 h-4" />
               <span>AI Chat Assistant</span>
-              <span className="text-[9px] bg-indigo-100 text-indigo-700 px-1.5 py-0.2 rounded-full uppercase">Grounded</span>
+              <span className="text-[9px] bg-indigo-100 text-indigo-700 px-1.5 py-0.2 rounded-full uppercase">Multimodal</span>
             </button>
           </div>
 
@@ -388,7 +558,7 @@ export default function PublicSearch() {
                 { id: 'all', label: 'All' },
                 { id: 'web', label: 'Web' },
                 { id: 'images', label: 'Images' },
-                { id: 'public_resources', label: 'Public Academix Notes' }
+                { id: 'public_resources', label: 'Public Academic Notes' }
               ].map(tab => (
                 <button
                   key={tab.id}
@@ -436,7 +606,7 @@ export default function PublicSearch() {
                 className="bg-white border border-slate-200 rounded-xl px-2.5 py-1 text-xs font-bold text-slate-700 outline-none cursor-pointer shadow-2xs"
               >
                 <option value="gemini">Gemini 2.5 Flash</option>
-                <option value="openrouter">OpenRouter</option>
+                <option value="openrouter">OpenRouter (Multimodal)</option>
               </select>
             </div>
           )}
@@ -569,7 +739,7 @@ export default function PublicSearch() {
                   </div>
                 )}
 
-                {/* 2. IMAGE RESULTS (If Images or All) */}
+                {/* 2. IMAGE RESULTS (Responsive Grid with 6-10 Distinct Images) */}
                 {(normalSubFilter === 'all' || normalSubFilter === 'images') && imageResults.length > 0 && (
                   <div className="space-y-3 pt-2">
                     <div className="flex items-center gap-2">
@@ -581,14 +751,14 @@ export default function PublicSearch() {
                       </h3>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3.5">
                       {imageResults.map((img) => (
                         <div
                           key={img.id}
                           onClick={() => setSelectedImageModal(img)}
-                          className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-2xs hover:shadow-md group cursor-pointer transition-all"
+                          className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-2xs hover:shadow-md group cursor-pointer transition-all flex flex-col justify-between"
                         >
-                          <div className="h-32 bg-slate-100 relative overflow-hidden flex items-center justify-center">
+                          <div className="h-36 bg-slate-100 relative overflow-hidden flex items-center justify-center">
                             <img
                               src={img.imageUrl}
                               alt={img.title}
@@ -596,11 +766,14 @@ export default function PublicSearch() {
                               loading="lazy"
                               onError={(e) => { e.target.style.display = 'none'; }}
                             />
+                            <div className="absolute inset-0 bg-slate-900/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                              <Eye className="w-5 h-5" />
+                            </div>
                           </div>
-                          <div className="p-2.5 space-y-1">
-                            <h4 className="text-[11px] font-bold text-slate-800 truncate" title={img.title}>
+                          <div className="p-2.5 space-y-1 bg-white">
+                            <h5 className="text-xs font-bold text-slate-800 line-clamp-1 group-hover:text-indigo-600">
                               {img.title}
-                            </h4>
+                            </h5>
                             <span className="text-[10px] text-slate-400 block truncate">{img.domain}</span>
                           </div>
                         </div>
@@ -609,7 +782,7 @@ export default function PublicSearch() {
                   </div>
                 )}
 
-                {/* 3. GLOBAL WEB RESULTS */}
+                {/* 3. WEB RESULTS */}
                 {(normalSubFilter === 'all' || normalSubFilter === 'web') && (
                   <div className="space-y-4 pt-2">
                     <div className="flex items-center gap-2">
@@ -617,54 +790,48 @@ export default function PublicSearch() {
                         <Globe className="w-4 h-4" />
                       </div>
                       <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
-                        Global Web Results ({webResults.length})
+                        Web Search Results ({webResults.length})
                       </h3>
                     </div>
 
                     {webResults.length === 0 ? (
                       <div className="p-8 text-center bg-white rounded-2xl border border-slate-200 text-xs text-slate-400">
-                        No web results returned for this query.
+                        No web results found for this query.
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        {webResults.map((web) => (
+                        {webResults.map((r) => (
                           <div
-                            key={web.id}
-                            className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-md hover:border-indigo-200 transition-all space-y-2"
+                            key={r.id}
+                            className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs hover:shadow-sm transition-all space-y-2"
                           >
                             <div className="flex items-center gap-2 text-xs text-slate-500">
-                              {web.favicon && (
+                              {r.favicon && (
                                 <img
-                                  src={web.favicon}
+                                  src={r.favicon}
                                   alt=""
                                   className="w-4 h-4 rounded-sm"
                                   onError={(e) => { e.target.style.display = 'none'; }}
                                 />
                               )}
-                              <span className="font-semibold text-slate-600">{web.domain}</span>
-                              {web.publishedDate && (
-                                <>
-                                  <span>•</span>
-                                  <span className="text-[11px] text-slate-400">{web.publishedDate}</span>
-                                </>
+                              <span className="font-semibold text-slate-700">{r.domain}</span>
+                              {r.publishedDate && (
+                                <span className="text-[10px] text-slate-400">• {r.publishedDate}</span>
                               )}
                             </div>
 
-                            <h4 className="text-base font-bold text-indigo-900 hover:text-indigo-600 transition-colors">
-                              <a href={web.url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5">
-                                <span>{web.title}</span>
-                                <OutLink className="w-3.5 h-3.5 opacity-60 shrink-0" />
-                              </a>
-                            </h4>
+                            <a
+                              href={r.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-base font-bold text-indigo-700 hover:text-indigo-900 hover:underline block leading-snug"
+                            >
+                              {r.title}
+                            </a>
 
-                            <p className="text-xs sm:text-sm text-slate-600 leading-relaxed">
-                              {web.snippet}
+                            <p className="text-xs text-slate-600 leading-relaxed">
+                              {r.snippet}
                             </p>
-
-                            <div className="pt-1 flex items-center justify-between text-[11px] text-slate-400">
-                              <span className="truncate max-w-md">{web.url}</span>
-                              <span className="bg-slate-50 px-2 py-0.5 rounded border border-slate-150">{web.source}</span>
-                            </div>
                           </div>
                         ))}
                       </div>
@@ -674,48 +841,55 @@ export default function PublicSearch() {
 
               </div>
             ) : (
-              /* FEATURED PUBLIC COMMUNITY RESOURCES (Empty Search State) */
+              /* FEATURED PUBLIC NOTES (When no search has occurred yet) */
               <div className="space-y-4 pt-4">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <h3 className="text-lg font-bold text-slate-900">Featured Open Community Notes</h3>
-                    <p className="text-xs text-slate-500">Verified educational resources explicitly shared for open public study</p>
+                <div className="flex items-center justify-between pb-2 border-b border-slate-200">
+                  <div className="flex items-center gap-2">
+                    <div className="p-1.5 bg-emerald-100 text-emerald-700 rounded-lg">
+                      <BookOpen className="w-4 h-4" />
+                    </div>
+                    <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider">
+                      Featured Open Community Notes
+                    </h3>
                   </div>
+                  <span className="text-xs text-slate-400 font-semibold">Strictly Verified Public Resources</span>
                 </div>
 
                 {featuredResources.length === 0 ? (
-                  <div className="text-center py-10 bg-white rounded-3xl border border-slate-200 p-6 space-y-2">
+                  <div className="py-12 text-center bg-white rounded-2xl border border-slate-200 space-y-2">
                     <BookOpen className="w-8 h-8 text-slate-300 mx-auto" />
-                    <p className="text-xs font-bold text-slate-700">No public community notes published yet.</p>
-                    <p className="text-[11px] text-slate-400 max-w-sm mx-auto">
-                      Institute student and faculty notes remain strictly private to their enrolled departments unless explicitly published for open access.
-                    </p>
+                    <p className="text-xs text-slate-400">No public community notes uploaded yet.</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-                    {featuredResources.map((item) => (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                    {featuredResources.map(doc => (
                       <div
-                        key={item.id}
-                        className="bg-white p-5 rounded-2xl border border-slate-200/90 shadow-2xs hover:shadow-md hover:border-indigo-200 transition-all flex flex-col justify-between space-y-3"
+                        key={doc.id}
+                        className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs hover:shadow-md hover:border-indigo-200 transition-all flex flex-col justify-between space-y-3"
                       >
                         <div className="space-y-2">
-                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-150">
-                            {item.subject_name || 'Open Resource'}
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center gap-1">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            Verified Open Note
                           </span>
-                          <h4 className="text-xs font-bold text-slate-900 line-clamp-2">{item.title}</h4>
-                          <p className="text-[11px] text-slate-500 line-clamp-2">{item.description}</p>
+                          <h4 className="text-sm font-bold text-slate-900 line-clamp-1">{doc.title}</h4>
+                          <p className="text-xs text-slate-600 line-clamp-2">{doc.description || 'Public study resource.'}</p>
                         </div>
-                        {item.file_url && (
-                          <a
-                            href={item.file_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="text-xs font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
-                          >
-                            <span>Download</span>
-                            <Download className="w-3.5 h-3.5" />
-                          </a>
-                        )}
+
+                        <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
+                          <span className="text-[11px] text-slate-400">{doc.subject_name || doc.department_name || 'Academic Note'}</span>
+                          {doc.file_url && (
+                            <a
+                              href={doc.file_url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                            >
+                              <span>Download</span>
+                              <Download className="w-3.5 h-3.5" />
+                            </a>
+                          )}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -726,19 +900,24 @@ export default function PublicSearch() {
           </div>
         )}
 
-        {/* ── TAB 2: CONVERSATIONAL AI ASSISTANT ───────────────────────────────── */}
+        {/* ── TAB 2: CONVERSATIONAL AI ASSISTANT (Multimodal & Voice Input) ──── */}
         {activeTab === 'ai' && (
-          <div className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col h-[720px] max-h-[82vh]">
+          <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden flex flex-col h-[75vh]">
             
-            {/* AI Chat Header */}
-            <div className="px-6 py-3.5 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-              <div className="flex items-center gap-2.5">
-                <div className="p-2 bg-gradient-to-br from-indigo-600 to-violet-600 rounded-xl text-white shadow-2xs">
-                  <Bot className="w-4 h-4" />
+            {/* AI Assistant Banner */}
+            <div className="p-4 bg-gradient-to-r from-indigo-50/70 via-slate-50 to-violet-50/70 border-b border-slate-200 flex items-center justify-between">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white flex items-center justify-center shadow-xs">
+                  <Bot className="w-5 h-5" />
                 </div>
                 <div>
-                  <h3 className="text-sm font-bold text-slate-900">Academix Conversational AI</h3>
-                  <p className="text-[11px] text-slate-500">General educational reasoning, code synthesis, & web grounding</p>
+                  <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                    <span>Academix Multimodal Assistant</span>
+                    <span className="text-[9px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full uppercase font-bold">Active</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Grounded in live web knowledge, diagrams, handwritten problems & document analysis
+                  </p>
                 </div>
               </div>
 
@@ -746,41 +925,39 @@ export default function PublicSearch() {
                 <button
                   type="button"
                   onClick={handleStartNewChat}
-                  className="px-3 py-1 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1"
+                  className="px-3 py-1.5 bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all flex items-center gap-1 cursor-pointer"
                 >
-                  <Plus className="w-3.5 h-3.5 text-indigo-600" />
-                  <span>New Chat</span>
+                  <Plus className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">New Session</span>
                 </button>
               </div>
             </div>
 
-            {/* Chat Messages Log */}
-            <div className="flex-1 p-6 overflow-y-auto space-y-6 custom-scrollbar bg-[#fafafa]">
-              
+            {/* Chat Stream Viewport */}
+            <div className="flex-1 p-5 overflow-y-auto space-y-4 custom-scrollbar bg-slate-50/40">
               {chatMessages.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-center space-y-4 max-w-md mx-auto py-12">
-                  <div className="w-14 h-14 rounded-2xl bg-indigo-50 border border-indigo-100 text-indigo-600 flex items-center justify-center shadow-inner">
-                    <Sparkles className="w-7 h-7" />
+                <div className="h-full flex flex-col items-center justify-center text-center max-w-lg mx-auto space-y-4 py-8">
+                  <div className="w-14 h-14 rounded-2xl bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 shadow-sm">
+                    <Sparkles className="w-7 h-7 text-indigo-600 animate-pulse" />
                   </div>
                   <div className="space-y-1">
-                    <h3 className="text-lg font-bold text-slate-800">How can I assist your learning today?</h3>
+                    <h4 className="text-base font-bold text-slate-900">How can I assist your studies today?</h4>
                     <p className="text-xs text-slate-500 leading-relaxed">
-                      Ask any math, engineering, programming, science, or general concept question. I will provide a clear pedagogical explanation backed by verified sources.
+                      Ask academic questions, upload circuit diagrams or handwritten equations for visual analysis, or attach research documents for summaries.
                     </p>
                   </div>
 
-                  <div className="w-full space-y-2 pt-2">
-                    {exampleQuestions.slice(0, 3).map((q, idx) => (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 w-full pt-2">
+                    {exampleQuestions.map((q, idx) => (
                       <button
                         key={idx}
                         type="button"
                         onClick={() => {
                           setAiInputText(q);
                         }}
-                        className="w-full p-2.5 bg-white hover:bg-indigo-50/60 border border-slate-200 hover:border-indigo-200 rounded-xl text-xs text-slate-700 text-left font-medium transition-all flex items-center justify-between group shadow-2xs"
+                        className="p-2.5 bg-white hover:bg-indigo-50/70 border border-slate-200 hover:border-indigo-300 rounded-xl text-left text-xs font-medium text-slate-700 hover:text-indigo-800 transition-all cursor-pointer shadow-2xs"
                       >
-                        <span className="truncate pr-2">{q}</span>
-                        <ArrowRight className="w-3.5 h-3.5 text-slate-400 group-hover:text-indigo-600 shrink-0" />
+                        {q}
                       </button>
                     ))}
                   </div>
@@ -789,7 +966,9 @@ export default function PublicSearch() {
                 chatMessages.map((msg, idx) => (
                   <div
                     key={idx}
-                    className={`flex gap-3.5 ${msg.role === 'user' ? 'justify-end' : 'justify-start'} animate-in fade-in duration-200`}
+                    className={`flex gap-3.5 animate-in fade-in ${
+                      msg.role === 'user' ? 'justify-end' : 'justify-start'
+                    }`}
                   >
                     {msg.role === 'assistant' && (
                       <div className="w-8 h-8 rounded-xl bg-gradient-to-br from-indigo-600 to-violet-600 text-white flex items-center justify-center shrink-0 shadow-2xs mt-1">
@@ -800,13 +979,19 @@ export default function PublicSearch() {
                     <div className={`max-w-2xl rounded-2xl p-4.5 space-y-3 ${
                       msg.role === 'user'
                         ? 'bg-indigo-600 text-white shadow-md rounded-br-xs'
+                        : msg.isError
+                        ? 'bg-rose-50 text-rose-900 border border-rose-200 shadow-2xs rounded-bl-xs'
                         : 'bg-white text-slate-800 border border-slate-200/90 shadow-2xs rounded-bl-xs'
                     }`}>
                       
                       {/* Classification Badge for Assistant Messages */}
                       {msg.role === 'assistant' && msg.sourceClassification && (
                         <div className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
-                          msg.sourceClassification === 'WEB_GROUNDED'
+                          msg.sourceClassification === 'IMAGE_ANALYSIS'
+                            ? 'bg-violet-50 text-violet-700 border-violet-200'
+                            : msg.sourceClassification === 'DOCUMENT_GROUNDED'
+                            ? 'bg-amber-50 text-amber-700 border-amber-200'
+                            : msg.sourceClassification === 'WEB_GROUNDED'
                             ? 'bg-sky-50 text-sky-700 border-sky-200'
                             : msg.sourceClassification === 'PUBLIC_ACADEMIC_RESOURCE'
                             ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
@@ -814,12 +999,37 @@ export default function PublicSearch() {
                         }`}>
                           <ShieldCheck className="w-3 h-3" />
                           <span>
-                            {msg.sourceClassification === 'WEB_GROUNDED'
+                            {msg.sourceClassification === 'IMAGE_ANALYSIS'
+                              ? 'Multimodal Visual Image Analysis'
+                              : msg.sourceClassification === 'DOCUMENT_GROUNDED'
+                              ? 'Attached Document Grounded'
+                              : msg.sourceClassification === 'WEB_GROUNDED'
                               ? 'Grounded in Live Web Sources'
                               : msg.sourceClassification === 'PUBLIC_ACADEMIC_RESOURCE'
                               ? 'Grounded in Public Community Notes'
                               : 'General AI Knowledge Base'}
                           </span>
+                        </div>
+                      )}
+
+                      {/* User Attached File Preview (if present) */}
+                      {msg.role === 'user' && msg.attachment && (
+                        <div className="p-2.5 bg-indigo-700/60 rounded-xl border border-indigo-400/30 flex items-center gap-2.5 text-xs">
+                          {msg.attachment.isImage && msg.attachment.previewUrl ? (
+                            <img
+                              src={msg.attachment.previewUrl}
+                              alt={msg.attachment.name}
+                              className="w-10 h-10 object-cover rounded-lg border border-white/20"
+                            />
+                          ) : (
+                            <FileText className="w-6 h-6 text-indigo-200 shrink-0" />
+                          )}
+                          <div className="min-w-0 flex-1">
+                            <span className="font-bold text-white block truncate">{msg.attachment.name}</span>
+                            <span className="text-[10px] text-indigo-200">
+                              {msg.attachment.size ? `${(msg.attachment.size / 1024).toFixed(1)} KB` : 'Uploaded Attachment'}
+                            </span>
+                          </div>
                         </div>
                       )}
 
@@ -894,7 +1104,7 @@ export default function PublicSearch() {
                   <div className="bg-white border border-slate-200 p-4 rounded-2xl rounded-bl-xs shadow-2xs space-y-2">
                     <div className="flex items-center gap-2 text-xs font-bold text-indigo-700">
                       <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                      <span>Thinking & verifying knowledge sources...</span>
+                      <span>Thinking, analyzing visual cues & verifying knowledge...</span>
                     </div>
                   </div>
                 </div>
@@ -904,30 +1114,131 @@ export default function PublicSearch() {
             </div>
 
             {/* AI Chat Input Box */}
-            <div className="p-4 bg-white border-t border-slate-200">
-              <form onSubmit={handleSendAiMessage} className="relative">
-                <textarea
-                  rows={2}
-                  value={aiInputText}
-                  onChange={(e) => setAiInputText(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
-                      e.preventDefault();
-                      handleSendAiMessage();
-                    }
-                  }}
-                  placeholder="Ask a question or follow-up... (Enter to send, Shift+Enter for new line)"
-                  className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-4 pr-14 py-3 text-xs sm:text-sm font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white resize-none transition-all"
-                />
+            <div className="p-4 bg-white border-t border-slate-200 space-y-2.5">
+              
+              {/* Active Voice Input Notification */}
+              {isRecording && (
+                <div className="p-2.5 bg-rose-50 border border-rose-200 rounded-xl flex items-center justify-between text-xs text-rose-700 animate-pulse">
+                  <div className="flex items-center gap-2 font-bold">
+                    <span className="w-2.5 h-2.5 bg-rose-600 rounded-full animate-ping" />
+                    <span>Listening... speak clearly into your microphone</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={toggleVoiceInput}
+                    className="px-2 py-0.5 bg-rose-600 text-white font-bold rounded-lg text-[10px]"
+                  >
+                    Stop
+                  </button>
+                </div>
+              )}
 
+              {/* Voice Input Error Message */}
+              {speechError && (
+                <div className="p-2 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800 flex items-center gap-1.5">
+                  <AlertCircle className="w-4 h-4 shrink-0 text-amber-600" />
+                  <span>{speechError}</span>
+                </div>
+              )}
+
+              {/* Selected File Attachment Chip */}
+              {selectedFile && (
+                <div className="p-2 bg-indigo-50 border border-indigo-200 rounded-xl flex items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {selectedFile.isImage && selectedFile.previewUrl ? (
+                      <img
+                        src={selectedFile.previewUrl}
+                        alt="Preview"
+                        className="w-8 h-8 object-cover rounded-lg border border-indigo-200"
+                      />
+                    ) : (
+                      <FileCheck className="w-5 h-5 text-indigo-600 shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <span className="font-bold text-slate-800 block truncate">{selectedFile.name}</span>
+                      <span className="text-[10px] text-slate-500">{(selectedFile.size / 1024).toFixed(1)} KB</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleRemoveFile}
+                    className="p-1 text-slate-400 hover:text-rose-600 rounded-lg cursor-pointer"
+                    title="Remove attachment"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              )}
+
+              {/* Hidden File Input */}
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                accept=".pdf,.doc,.docx,.txt,.png,.jpg,.jpeg,.webp"
+                className="hidden"
+              />
+
+              <form onSubmit={handleSendAiMessage} className="relative flex items-center gap-2">
+                
+                {/* File Attachment Button */}
                 <button
-                  type="submit"
-                  disabled={loading || !aiInputText.trim()}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 p-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl shadow-xs transition-all cursor-pointer"
-                  title="Send Message"
+                  type="button"
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                    selectedFile
+                      ? 'bg-indigo-100 text-indigo-700 border-indigo-300'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'
+                  }`}
+                  title="Attach document or image for visual AI analysis (PDF, DOCX, TXT, JPG, PNG, WEBP)"
                 >
-                  <Send className="w-4 h-4" />
+                  <Paperclip className="w-4 h-4" />
                 </button>
+
+                {/* Voice Input Microphone Button */}
+                <button
+                  type="button"
+                  onClick={toggleVoiceInput}
+                  className={`p-2.5 rounded-xl border transition-all cursor-pointer ${
+                    isRecording
+                      ? 'bg-rose-600 text-white border-rose-600 shadow-md ring-2 ring-rose-300 animate-pulse'
+                      : 'bg-slate-100 hover:bg-slate-200 text-slate-600 border-slate-200'
+                  }`}
+                  title={isRecording ? 'Stop Recording' : 'Voice Input (Speak question)'}
+                >
+                  {isRecording ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
+                </button>
+
+                {/* Text Input Area */}
+                <div className="relative flex-1">
+                  <textarea
+                    rows={2}
+                    value={aiInputText}
+                    onChange={(e) => setAiInputText(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        handleSendAiMessage();
+                      }
+                    }}
+                    placeholder={
+                      selectedFile
+                        ? `Ask a question about "${selectedFile.name}"... (e.g. explain, summarize, solve equations)`
+                        : 'Ask a question or follow-up... (Enter to send, Shift+Enter for new line)'
+                    }
+                    className="w-full bg-slate-50 border border-slate-200 rounded-2xl pl-4 pr-12 py-2.5 text-xs sm:text-sm font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 focus:bg-white resize-none transition-all"
+                  />
+
+                  <button
+                    type="submit"
+                    disabled={loading || (!aiInputText.trim() && !selectedFile)}
+                    className="absolute right-2.5 top-1/2 -translate-y-1/2 p-2 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-xl shadow-xs transition-all cursor-pointer"
+                    title="Send Message"
+                  >
+                    <Send className="w-4 h-4" />
+                  </button>
+                </div>
+
               </form>
             </div>
 
@@ -945,7 +1256,7 @@ export default function PublicSearch() {
               <button
                 type="button"
                 onClick={() => setSelectedImageModal(null)}
-                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg"
+                className="p-1 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -966,7 +1277,7 @@ export default function PublicSearch() {
                   href={selectedImageModal.sourceUrl}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="px-3 py-1.5 bg-indigo-600 text-white font-bold rounded-xl flex items-center gap-1"
+                  className="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl flex items-center gap-1"
                 >
                   <span>Open Source Page</span>
                   <OutLink className="w-3.5 h-3.5" />
@@ -991,7 +1302,7 @@ export default function PublicSearch() {
               <button
                 type="button"
                 onClick={() => setShowHistoryDrawer(false)}
-                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-xl"
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-xl cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1114,7 +1425,7 @@ export default function PublicSearch() {
               <button
                 type="button"
                 onClick={historyTab === 'normal' ? handleClearNormalHistory : handleClearAiConversations}
-                className="text-xs font-bold text-rose-600 hover:text-rose-800"
+                className="text-xs font-bold text-rose-600 hover:text-rose-800 cursor-pointer"
               >
                 Clear All {historyTab === 'normal' ? 'Search History' : 'Conversations'}
               </button>
@@ -1122,7 +1433,7 @@ export default function PublicSearch() {
               <button
                 type="button"
                 onClick={() => setShowHistoryDrawer(false)}
-                className="px-3 py-1 bg-white border border-slate-200 text-xs font-bold text-slate-700 rounded-lg hover:bg-slate-100"
+                className="px-3 py-1 bg-white border border-slate-200 text-xs font-bold text-slate-700 rounded-lg hover:bg-slate-100 cursor-pointer"
               >
                 Close
               </button>

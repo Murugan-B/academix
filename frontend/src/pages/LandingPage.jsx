@@ -3,7 +3,7 @@ import { useNavigate, Link } from 'react-router-dom';
 import {
   BookOpen, Sparkles, BrainCircuit, Target, CheckCircle2, ArrowRight,
   Bot, Layers, BarChart3, Users, ShieldCheck, GraduationCap, Clock,
-  Flame, Award, Check, Menu, X, ChevronRight, FileText
+  Flame, Award, Check, Menu, X, ChevronRight, FileText, LogOut
 } from 'lucide-react';
 
 export default function LandingPage() {
@@ -14,6 +14,12 @@ export default function LandingPage() {
   const token = localStorage.getItem('token');
   const user = (userStr && token) ? JSON.parse(userStr) : null;
 
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    localStorage.removeItem('user');
+    navigate('/login', { replace: true });
+  };
+
   const getDashboardRoute = () => {
     if (!user) return '/login';
     const role = user.role;
@@ -21,7 +27,7 @@ export default function LandingPage() {
     if (role === 'INSTITUTE_ADMIN') return '/institute-admin';
     if (role === 'HOD') return '/hod';
     if (role === 'FACULTY') return '/faculty';
-    if (role === 'PUBLIC_USER') return '/public-search';
+    if (role === 'PUBLIC_USER') return '/my-hub';
     return '/student';
   };
 
@@ -87,13 +93,22 @@ export default function LandingPage() {
           {/* Right Action */}
           <div className="hidden md:flex items-center gap-2.5">
             {user ? (
-              <button
-                onClick={() => navigate(getDashboardRoute())}
-                className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-all flex items-center gap-1.5 active:scale-95"
-              >
-                <span>{user.role === 'PUBLIC_USER' ? 'My Hub' : 'Go to Dashboard'}</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => navigate(getDashboardRoute())}
+                  className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold rounded-lg shadow-sm transition-all flex items-center gap-1.5 active:scale-95 cursor-pointer"
+                >
+                  <span>{user.role === 'PUBLIC_USER' ? 'My Hub' : 'Go to Dashboard'}</span>
+                  <ArrowRight className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={handleLogout}
+                  className="p-2 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                  title="Sign Out"
+                >
+                  <LogOut className="w-4 h-4" />
+                </button>
+              </div>
             ) : (
               <>
                 <Link
@@ -150,13 +165,22 @@ export default function LandingPage() {
             >
               Platform
             </button>
-            <div className="pt-2 border-t border-slate-100">
+            <div className="pt-2 border-t border-slate-100 flex flex-col gap-2">
               <Link
                 to={user ? getDashboardRoute() : '/login'}
                 className="w-full flex items-center justify-center py-2.5 bg-indigo-600 text-white text-xs font-bold rounded-xl shadow-sm"
               >
-                {user ? 'Go to Dashboard' : 'Sign In to Academix'}
+                {user ? (user.role === 'PUBLIC_USER' ? 'Go to My Hub' : 'Go to Dashboard') : 'Sign In to Academix'}
               </Link>
+              {user && (
+                <button
+                  onClick={handleLogout}
+                  className="w-full flex items-center justify-center gap-1.5 py-2 bg-rose-50 text-rose-600 text-xs font-bold rounded-xl border border-rose-200"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  <span>Sign Out</span>
+                </button>
+              )}
             </div>
           </div>
         )}

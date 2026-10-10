@@ -22,6 +22,7 @@ export default function UploadStudentResourceModal({ onClose, onSuccess }) {
     description: '',
     tags: ''
   });
+  const [isPublic, setIsPublic] = useState(false);
 
   const [file, setFile] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -169,6 +170,7 @@ export default function UploadStudentResourceModal({ onClose, onSuccess }) {
     data.append('unit_id', selectedUnit);
     data.append('lesson_id', selectedLesson);
     data.append('topic_id', selectedTopic);
+    data.append('is_public', String(isPublic));
     data.append('file', file);
 
     try {
@@ -389,6 +391,23 @@ export default function UploadStudentResourceModal({ onClose, onSuccess }) {
                 className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-medium text-slate-700 focus:ring-2 focus:ring-indigo-500 outline-none"
               />
             </div>
+          </div>
+
+          {/* Public Sharing Option */}
+          <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-150 flex items-start gap-3">
+            <input
+              type="checkbox"
+              id="isPublicCheck"
+              checked={isPublic}
+              onChange={(e) => setIsPublic(e.target.checked)}
+              className="mt-1 rounded text-indigo-600 focus:ring-indigo-500 w-4 h-4 cursor-pointer shrink-0"
+            />
+            <label htmlFor="isPublicCheck" className="text-xs text-indigo-950 leading-relaxed cursor-pointer">
+              <strong className="block text-indigo-900 font-bold">Share Publicly with Academix Global Community</strong>
+              <span className="text-slate-600">
+                Allow scholars outside your institute to discover and download this note in Global Public Search once verified & approved.
+              </span>
+            </label>
           </div>
 
           {/* File Upload Drag & Drop */}

@@ -87,7 +87,7 @@ exports.normalSearch = async (req, res) => {
         await db.query(
           `INSERT INTO search_history (user_id, query, search_mode, result_count)
            VALUES ($1, $2, $3, $4)`,
-          [req.user.id, cleanQuery, search_type, (webData.results?.length || 0) + formattedPublicResources.length]
+          [req.user.id, cleanQuery, search_type, (webData.results?.length || 0) + (webData.images?.length || 0) + formattedPublicResources.length]
         );
       } catch (histErr) {
         console.warn('[PublicSearch] Save search history warning:', histErr.message);
@@ -130,13 +130,15 @@ exports.getFeaturedResources = async (req, res) => {
         sr.file_size,
         sr.created_at,
         d.name as department_name,
-        s.name as subject_name
+        s.name as subject_name,
+        u.name as contributor_name
       FROM student_resources sr
       LEFT JOIN departments d ON sr.department_id = d.id
       LEFT JOIN subjects s ON sr.subject_id = s.id
+      LEFT JOIN users u ON sr.uploaded_by = u.id
       WHERE sr.status = 'APPROVED' AND sr.is_public = TRUE
       ORDER BY sr.created_at DESC
-      LIMIT 8
+      LIMIT 12
     `);
 
     res.json(result.rows);
@@ -148,10 +150,18 @@ exports.getFeaturedResources = async (req, res) => {
 
 /**
  * 3. Conversational AI Assistant & Search
- * Supports multi-turn conversation, web-grounded research, and persistent chat history
+ * Supports multi-turn conversation, multimodal vision, document attachment, and persistent chat history
  */
 exports.aiChat = async (req, res) => {
-  const { query, conversationId, provider = 'gemini', includeWebSearch = true } = req.body;
+  const {
+    query,
+    conversationId,
+    provider = 'gemini',
+    includeWebSearch = true,
+    fileName,
+    fileMimeType,
+    fileBase64
+  } = req.body;
   const userId = req.user?.id;
 
   try {
@@ -183,12 +193,22 @@ exports.aiChat = async (req, res) => {
       }
     }
 
+    // Process file attachment if uploaded via multipart/form-data (req.file) or base64 JSON
+    const uploadedFileBuffer = req.file?.buffer || null;
+    const effectiveFileName = req.file?.originalname || fileName || null;
+    const effectiveMimeType = req.file?.mimetype || fileMimeType || null;
+    const effectiveBase64 = fileBase64 || null;
+
     // Call Conversational AI Service
     const aiResult = await conversationalService.processConversationalQuery({
       query: cleanQuery,
       conversationHistory: historyMessages,
       provider,
-      includeWebSearch
+      includeWebSearch: includeWebSearch === 'true' || includeWebSearch === true,
+      fileBuffer: uploadedFileBuffer,
+      fileName: effectiveFileName,
+      fileMimeType: effectiveMimeType,
+      fileBase64: effectiveBase64
     });
 
     // Save to Persistent Conversation History if User is Authenticated
@@ -240,7 +260,9 @@ exports.aiChat = async (req, res) => {
       sourceClassification: aiResult.sourceClassification,
       citationDisclaimer: aiResult.citationDisclaimer,
       sources: aiResult.sources,
-      providerUsed: aiResult.providerUsed
+      providerUsed: aiResult.providerUsed,
+      hasImageAttachment: aiResult.hasImageAttachment,
+      hasDocumentContext: aiResult.hasDocumentContext
     });
   } catch (error) {
     console.error('AI chat processing error:', error);
@@ -302,7 +324,7 @@ exports.getAiConversations = async (req, res) => {
   const userId = req.user.id;
   try {
     const result = await db.query(
-      `SELECT id, title, selected_provider, created_at, updated_at
+      `SELECT id, title, selected_provider, conversation_type, created_at, updated_at
        FROM ai_conversations
        WHERE user_id = $1 AND conversation_type = 'PUBLIC_AI_SEARCH'
        ORDER BY updated_at DESC
@@ -319,15 +341,16 @@ exports.getAiConversations = async (req, res) => {
 exports.getAiConversationDetails = async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;
-
   try {
     const convRes = await db.query(
-      `SELECT * FROM ai_conversations WHERE id = $1 AND user_id = $2`,
+      `SELECT id, title, selected_provider, created_at, updated_at
+       FROM ai_conversations
+       WHERE id = $1 AND user_id = $2`,
       [id, userId]
     );
 
     if (convRes.rowCount === 0) {
-      return res.status(404).json({ message: 'Conversation not found or access denied.' });
+      return res.status(404).json({ message: 'Conversation not found or unauthorized.' });
     }
 
     const messagesRes = await db.query(
@@ -338,9 +361,19 @@ exports.getAiConversationDetails = async (req, res) => {
       [id]
     );
 
+    const formattedMessages = messagesRes.rows.map(m => ({
+      id: m.id,
+      role: m.sender === 'user' ? 'user' : 'assistant',
+      content: m.content,
+      provider: m.provider,
+      citations: m.citations ? (typeof m.citations === 'string' ? JSON.parse(m.citations) : m.citations) : [],
+      grounding: m.grounding,
+      timestamp: m.created_at
+    }));
+
     res.json({
       conversation: convRes.rows[0],
-      messages: messagesRes.rows
+      messages: formattedMessages
     });
   } catch (err) {
     console.error('Get conversation details error:', err);
@@ -351,7 +384,6 @@ exports.getAiConversationDetails = async (req, res) => {
 exports.deleteAiConversation = async (req, res) => {
   const userId = req.user.id;
   const { id } = req.params;
-
   try {
     const delRes = await db.query(
       `DELETE FROM ai_conversations WHERE id = $1 AND user_id = $2 RETURNING id`,
@@ -360,23 +392,20 @@ exports.deleteAiConversation = async (req, res) => {
     if (delRes.rowCount === 0) {
       return res.status(404).json({ message: 'Conversation not found or unauthorized.' });
     }
-    res.json({ success: true, message: 'Conversation deleted.' });
+    res.json({ success: true, message: 'AI conversation deleted.' });
   } catch (err) {
     console.error('Delete AI conversation error:', err);
-    res.status(500).json({ message: 'Failed to delete conversation.' });
+    res.status(500).json({ message: 'Failed to delete AI conversation.' });
   }
 };
 
 exports.clearAiConversations = async (req, res) => {
   const userId = req.user.id;
   try {
-    await db.query(
-      `DELETE FROM ai_conversations WHERE user_id = $1 AND conversation_type = 'PUBLIC_AI_SEARCH'`,
-      [userId]
-    );
+    await db.query(`DELETE FROM ai_conversations WHERE user_id = $1 AND conversation_type = 'PUBLIC_AI_SEARCH'`, [userId]);
     res.json({ success: true, message: 'All AI conversations cleared.' });
   } catch (err) {
     console.error('Clear AI conversations error:', err);
-    res.status(500).json({ message: 'Failed to clear conversations.' });
+    res.status(500).json({ message: 'Failed to clear AI conversations.' });
   }
 };
