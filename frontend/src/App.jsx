@@ -5,6 +5,11 @@ import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
 import PublicSearch from './pages/PublicSearch';
 import MyHub from './pages/MyHub';
+import PublicLibrary from './pages/PublicLibrary';
+import MyNotes from './pages/MyNotes';
+import AITestGenerator from './pages/AITestGenerator';
+import SavedMaterials from './pages/SavedMaterials';
+import MyContributions from './pages/MyContributions';
 import UsersAndRoles from './pages/UsersAndRoles';
 import Settings from './pages/Settings';
 import Subjects from './pages/Subjects';
@@ -57,6 +62,13 @@ function App() {
           <Route path="ai-assistant" element={<AIAssistant />} />
           <Route path="ai-learning" element={<AILearning />} />
           <Route path="cohort-learning-gaps" element={<CohortLearningGaps />} />
+
+          {/* Public User Ecosystem Routes */}
+          <Route path="public-library" element={<PublicLibrary />} />
+          <Route path="my-notes" element={<MyNotes />} />
+          <Route path="ai-test-generator" element={<AITestGenerator />} />
+          <Route path="saved-materials" element={<SavedMaterials />} />
+          <Route path="my-contributions" element={<MyContributions />} />
         </Route>
         
         {/* Full-screen quiz page — outside Layout */}

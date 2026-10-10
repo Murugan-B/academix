@@ -513,23 +513,28 @@ exports.sendMessage = async (req, res) => {
 
 exports.getProvidersStatus = async (req, res) => {
   try {
-    const geminiAvailable = !!process.env.GEMINI_API_KEY;
-    const openrouterKey = process.env.OPENROUTER_API_KEY || '';
-    const openrouterAvailable = !!(openrouterKey && openrouterKey.trim() && openrouterKey !== 'your_new_key_here');
+    const routerService = require('../services/ai/routerService');
+    const systemStatus = routerService.getSystemStatus();
+    const models = routerService.getAvailableModels();
 
     res.json({
       gemini: { 
-        status: geminiAvailable ? 'available' : 'unavailable', 
-        label: 'Gemini',
-        model: 'gemini-2.5-flash',
-        configured: geminiAvailable 
+        status: systemStatus.gemini.availableSlots > 0 ? 'available' : (systemStatus.gemini.configured ? 'cooling' : 'unavailable'), 
+        label: 'Gemini (Google)',
+        model: systemStatus.gemini.preferredModel,
+        configured: systemStatus.gemini.configured,
+        totalSlots: systemStatus.gemini.totalSlots,
+        availableSlots: systemStatus.gemini.availableSlots,
+        slots: systemStatus.gemini.slots
       },
       openrouter: {
-        status: openrouterAvailable ? 'available' : 'unavailable',
-        label: 'OpenRouter',
-        model: process.env.OPENROUTER_MODEL || 'openrouter/free',
-        configured: openrouterAvailable
-      }
+        status: systemStatus.openrouter.status,
+        label: 'OpenRouter AI',
+        model: systemStatus.openrouter.defaultModel,
+        visionModel: systemStatus.openrouter.visionModel,
+        configured: systemStatus.openrouter.configured
+      },
+      models
     });
   } catch (err) {
     console.error('Providers status error:', err);

@@ -220,11 +220,13 @@ class ConversationalService {
   /**
    * Main Conversational Query Processor
    * Supports Text, Document Attachments (PDF, DOCX, TXT), and Multimodal Images (JPG, PNG, WEBP)
+   * Powered by central SmartAIRouter with multi-key rotation and multi-provider fallback.
    */
   async processConversationalQuery({
     query,
     conversationHistory = [],
-    provider = 'gemini',
+    provider = 'auto',
+    model = 'auto',
     includeWebSearch = true,
     fileBuffer = null,
     fileName = null,
@@ -235,6 +237,7 @@ class ConversationalService {
       throw new Error('User query is required.');
     }
 
+    const routerService = require('./routerService');
     const cleanQuery = query.trim();
     classifyQuery(cleanQuery, false);
 
@@ -364,59 +367,52 @@ ${retrievedContext ? retrievedContext : (!documentContext && !imageAttachment ? 
     const sanitizedHistory = (conversationHistory || []).map(m => ({
       role: m.role === 'assistant' || m.sender === 'assistant' ? 'assistant' : 'user',
       content: m.content || m.text || ''
-    })).filter(m => Boolean(m.content.trim()));
+    })).filter(m => Boolean(m.content && m.content.trim()));
 
     sanitizedHistory.push({ role: 'user', content: cleanQuery });
 
-    // E. Determine initial provider (skip Gemini directly if quota cooldown is active)
-    let usedProvider = provider || 'gemini';
-    if (usedProvider === 'gemini' && Date.now() < this.geminiQuotaExhaustedUntil) {
-      usedProvider = 'openrouter';
-    }
-
-    let answer = '';
+    // E. Determine preferred model from provider/model parameters
+    const preferredModel = (model && model !== 'auto') ? model : (provider === 'openrouter' ? 'openrouter-default' : (provider === 'gemini' ? 'gemini-2.5-flash' : 'auto'));
 
     try {
-      if (usedProvider === 'openrouter') {
-        answer = await this._callOpenRouter(systemPrompt, sanitizedHistory, imageAttachment);
-      } else {
-        answer = await this._callGemini(systemPrompt, sanitizedHistory, imageAttachment);
-      }
-    } catch (primaryErr) {
-      console.warn(`[ConversationalAI] Primary provider "${usedProvider}" failed: ${primaryErr.message}. Attempting automatic fallback...`);
-      const fallbackProvider = usedProvider === 'gemini' ? 'openrouter' : 'gemini';
-      try {
-        if (fallbackProvider === 'openrouter') {
-          answer = await this._callOpenRouter(systemPrompt, sanitizedHistory, imageAttachment);
-        } else {
-          answer = await this._callGemini(systemPrompt, sanitizedHistory, imageAttachment);
-        }
-        usedProvider = fallbackProvider;
-      } catch (fallbackErr) {
-        console.error(`[ConversationalAI] Both providers failed: ${fallbackErr.message}`);
-        return {
-          query: cleanQuery,
-          answer: "I apologize, but our AI services are currently experiencing temporary high volume or provider rate limits. Please try asking again in a few moments, or explore our Global Web & Public Resources Search for instant references.",
-          sourceClassification: 'SERVICE_NOTICE',
-          citationDisclaimer: 'AI service temporarily experiencing high traffic.',
-          sources: [],
-          providerUsed: 'fallback-notice',
-          hasImageAttachment: Boolean(imageAttachment),
-          hasDocumentContext: Boolean(documentContext)
-        };
-      }
-    }
+      const result = await routerService.generateContent({
+        systemPrompt,
+        messages: sanitizedHistory,
+        imageAttachment,
+        preferredModel,
+        temperature: 0.7
+      });
 
-    return {
-      query: cleanQuery,
-      answer,
-      sourceClassification,
-      citationDisclaimer,
-      sources,
-      providerUsed: usedProvider,
-      hasImageAttachment: Boolean(imageAttachment),
-      hasDocumentContext: Boolean(documentContext)
-    };
+      return {
+        query: cleanQuery,
+        answer: result.text,
+        sourceClassification,
+        citationDisclaimer,
+        sources,
+        providerUsed: result.providerUsed,
+        modelUsed: result.modelUsed,
+        slotUsed: result.slotUsed,
+        fallbackOccurred: result.fallbackOccurred,
+        fallbackReason: result.fallbackReason,
+        hasImageAttachment: Boolean(imageAttachment),
+        hasDocumentContext: Boolean(documentContext)
+      };
+    } catch (err) {
+      console.error(`[ConversationalAI] Router generation error: ${err.message}`);
+      return {
+        query: cleanQuery,
+        answer: "I apologize, but our AI services are currently experiencing temporary high volume or provider rate limits. Please try asking again in a few moments, or explore our Global Web & Public Resources Search for instant references.",
+        sourceClassification: 'SERVICE_NOTICE',
+        citationDisclaimer: 'AI service temporarily experiencing high traffic.',
+        sources: [],
+        providerUsed: 'fallback-notice',
+        modelUsed: 'unavailable',
+        fallbackOccurred: true,
+        fallbackReason: err.message,
+        hasImageAttachment: Boolean(imageAttachment),
+        hasDocumentContext: Boolean(documentContext)
+      };
+    }
   }
 }
 

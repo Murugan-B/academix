@@ -39,14 +39,14 @@ export default function Layout() {
     if (role === 'INSTITUTE_ADMIN') return '/institute-admin';
     if (role === 'HOD') return '/hod';
     if (role === 'FACULTY') return '/faculty';
-    if (role === 'PUBLIC_USER') return '/public-search';
+    if (role === 'PUBLIC_USER') return '/my-hub';
     return '/student';
   };
 
   const handleLogout = () => {
     localStorage.removeItem('token');
     localStorage.removeItem('user');
-    navigate('/login');
+    navigate('/login', { replace: true });
   };
 
   const isFullScreen = currentPath === '/ai-assistant';
@@ -58,6 +58,15 @@ export default function Layout() {
   // Grouped Navigation Items with metadata for fast search
   const navLinks = [
     {
+      to: '/my-hub',
+      label: 'My Hub',
+      description: 'Personal study space, recent activity & bookmarks',
+      category: 'PAGES',
+      icon: LayoutDashboard,
+      show: role === 'PUBLIC_USER',
+      active: currentPath === '/my-hub' || currentPath === '/public-hub'
+    },
+    {
       to: getDashboardRoute(),
       label: 'Dashboard',
       description: 'Overview, departmental metrics & approvals',
@@ -68,12 +77,57 @@ export default function Layout() {
     },
     {
       to: '/public-search',
-      label: 'Public Search',
-      description: 'Search approved open notes & AI educational knowledge',
+      label: 'Global Search & AI',
+      description: 'Search approved open notes, web & multimodal AI',
       category: 'SEARCH',
       icon: Search,
       show: true,
       active: currentPath === '/public-search'
+    },
+    {
+      to: '/public-library',
+      label: 'Public Academic Notes',
+      description: 'Structured community course folders, videos & notes',
+      category: 'ACADEMIC',
+      icon: BookOpen,
+      show: true,
+      active: currentPath === '/public-library'
+    },
+    {
+      to: '/ai-test-generator',
+      label: 'AI Test Generator',
+      description: 'Generate adaptive practice tests with automatic grading',
+      category: 'ACADEMIC',
+      icon: Sparkles,
+      show: true,
+      active: currentPath === '/ai-test-generator'
+    },
+    {
+      to: '/my-notes',
+      label: 'My Notes',
+      description: 'Personal study notes, revision guides & AI notes',
+      category: 'ACADEMIC',
+      icon: BookText,
+      show: true,
+      active: currentPath === '/my-notes'
+    },
+    {
+      to: '/saved-materials',
+      label: 'Saved Materials',
+      description: 'Bookmarked peer resources and video lectures',
+      category: 'ACADEMIC',
+      icon: FolderHeart,
+      show: true,
+      active: currentPath === '/saved-materials'
+    },
+    {
+      to: '/my-contributions',
+      label: 'My Contributions',
+      description: 'Track review status of your public submissions',
+      category: 'ACADEMIC',
+      icon: CheckSquare,
+      show: true,
+      active: currentPath === '/my-contributions'
     },
     {
       to: '/subjects',
@@ -90,7 +144,7 @@ export default function Layout() {
       description: 'Shared peer notes & community study materials',
       category: 'ACADEMIC',
       icon: FolderHeart,
-      show: true,
+      show: ['HOD', 'FACULTY', 'STUDENT'].includes(role),
       active: currentPath === '/student-resources'
     },
     {
@@ -99,7 +153,7 @@ export default function Layout() {
       description: 'Ask questions and analyze academic materials with citations',
       category: 'ACADEMIC',
       icon: Bot,
-      show: true,
+      show: ['HOD', 'FACULTY', 'STUDENT', 'SUPER_ADMIN', 'INSTITUTE_ADMIN'].includes(role),
       active: currentPath === '/ai-assistant'
     },
     {
@@ -140,8 +194,8 @@ export default function Layout() {
     },
     {
       to: '/settings',
-      label: 'Settings',
-      description: 'Profile settings & account preferences',
+      label: 'Settings & Quotas',
+      description: 'Profile settings & AI Quota management',
       category: 'PAGES',
       icon: Settings,
       show: true,

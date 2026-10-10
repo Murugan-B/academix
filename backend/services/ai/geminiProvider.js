@@ -1,67 +1,69 @@
 const AIProvider = require('./aiProvider');
 const { GoogleGenAI } = require('@google/genai');
+const geminiKeyManager = require('./geminiKeyManager');
 
 class GeminiProvider extends AIProvider {
   constructor() {
     super();
-    this.ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     this.candidateModels = [
-      'gemini-2.5-flash',
-      'gemini-3.5-flash',
-      'gemini-3.6-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-3.8-flash'
+      process.env.GEMINI_PREFERRED_MODEL || 'gemini-2.5-flash',
+      'gemini-2.0-flash',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro'
     ];
     this.modelName = this.candidateModels[0];
   }
 
   /**
-   * Helper to execute Gemini generation with automatic multi-model fallback on 503/429/UNAVAILABLE spikes.
+   * Helper to execute Gemini generation with automatic multi-key rotation and candidate model fallback
    */
   async _generateContentWithFallback(requestParams) {
-    if (!process.env.GEMINI_API_KEY) {
+    if (!geminiKeyManager.hasConfiguredKeys()) {
       throw new Error('Gemini API key is not configured in backend environment.');
     }
 
     let lastError = null;
 
-    for (let i = 0; i < this.candidateModels.length; i++) {
-      const model = this.candidateModels[i];
-      try {
-        const response = await this.ai.models.generateContent({
-          model,
-          ...requestParams
-        });
-        return response;
-      } catch (error) {
-        lastError = error;
-        const msg = error?.message || String(error);
-        const isTransient = msg.includes('503') ||
-          msg.includes('high demand') ||
-          msg.includes('UNAVAILABLE') ||
-          msg.includes('429') ||
-          msg.includes('RESOURCE_EXHAUSTED') ||
-          msg.includes('404') ||
-          msg.includes('NOT_FOUND');
+    for (const model of this.candidateModels) {
+      const attemptedSlots = [];
 
-        console.warn(`[Gemini Provider] Model "${model}" failed (attempt ${i + 1}/${this.candidateModels.length}): ${msg}`);
-
-        if (isTransient && i < this.candidateModels.length - 1) {
-          const nextModel = this.candidateModels[i + 1];
-          console.log(`[Gemini Provider] Automatically falling back to candidate model "${nextModel}"...`);
-          // Brief pause before trying next candidate
-          await new Promise(resolve => setTimeout(resolve, 600));
-          continue;
+      while (true) {
+        const slot = geminiKeyManager.acquireKey(attemptedSlots);
+        if (!slot) {
+          break; // No more available keys for this model
         }
+        attemptedSlots.push(slot.slotId);
 
-        // If not a retryable error or last model exhausted
-        if (!isTransient) {
-          throw error;
+        try {
+          const ai = new GoogleGenAI({ apiKey: slot.key });
+          const response = await ai.models.generateContent({
+            model,
+            ...requestParams
+          });
+          geminiKeyManager.recordSuccess(slot.slotId);
+          return response;
+        } catch (error) {
+          lastError = error;
+          const failResult = geminiKeyManager.recordFailure(slot.slotId, error);
+          const msg = error?.message || String(error);
+          console.warn(`[Gemini Provider] Slot "${slot.slotId}" Model "${model}" notice: ${msg}`);
+
+          if (failResult.isQuota) {
+            // Rate limited on this key: loop to try next available key
+            continue;
+          }
+          if (failResult.isInvalid) {
+            // Invalid key: loop to try next key
+            continue;
+          }
+
+          // If transient error (e.g. 503), try next key or model
+          break;
         }
       }
     }
 
-    throw lastError || new Error('All Gemini candidate models failed to generate content.');
+    throw lastError || new Error('All configured Gemini keys and candidate models failed to generate content.');
   }
 
   /**

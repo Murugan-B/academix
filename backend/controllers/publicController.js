@@ -152,11 +152,14 @@ exports.getFeaturedResources = async (req, res) => {
  * 3. Conversational AI Assistant & Search
  * Supports multi-turn conversation, multimodal vision, document attachment, and persistent chat history
  */
+const usageLedgerService = require('../services/ai/usageLedgerService');
+
 exports.aiChat = async (req, res) => {
   const {
     query,
     conversationId,
-    provider = 'gemini',
+    provider = 'auto',
+    model = 'auto',
     includeWebSearch = true,
     fileName,
     fileMimeType,
@@ -170,6 +173,18 @@ exports.aiChat = async (req, res) => {
     }
 
     const cleanQuery = query.trim();
+
+    // Determine category based on attachments
+    const isImage = (fileMimeType && fileMimeType.startsWith('image/')) || (req.file?.mimetype && req.file.mimetype.startsWith('image/'));
+    const isDoc = (req.file && !isImage) || (fileName && !isImage);
+    const featureCategory = isImage ? 'VISION_IMAGE_ANALYSIS' : (isDoc ? 'DOCUMENT_ANALYSIS' : 'CONVERSATIONAL_CHAT');
+
+    // 1. Enforce AI Quota check
+    const quotaCheck = await usageLedgerService.checkQuota(userId, featureCategory);
+    if (!quotaCheck.allowed) {
+      return res.status(429).json({ message: quotaCheck.reason });
+    }
+
     let historyMessages = [];
     let currentConvId = conversationId;
 
@@ -204,11 +219,24 @@ exports.aiChat = async (req, res) => {
       query: cleanQuery,
       conversationHistory: historyMessages,
       provider,
+      model,
       includeWebSearch: includeWebSearch === 'true' || includeWebSearch === true,
       fileBuffer: uploadedFileBuffer,
       fileName: effectiveFileName,
       fileMimeType: effectiveMimeType,
       fileBase64: effectiveBase64
+    });
+
+    // Record Usage in Ledger
+    await usageLedgerService.recordUsage({
+      userId,
+      featureCategory,
+      provider: aiResult.providerUsed || provider,
+      model: aiResult.modelUsed || 'auto',
+      promptTokens: 200,
+      completionTokens: Math.max(50, Math.floor((aiResult.answer || '').length / 4)),
+      status: aiResult.providerUsed === 'fallback-notice' ? 'FAILED' : 'SUCCESS',
+      ipAddress: req.ip
     });
 
     // Save to Persistent Conversation History if User is Authenticated
@@ -261,11 +289,24 @@ exports.aiChat = async (req, res) => {
       citationDisclaimer: aiResult.citationDisclaimer,
       sources: aiResult.sources,
       providerUsed: aiResult.providerUsed,
+      modelUsed: aiResult.modelUsed,
+      slotUsed: aiResult.slotUsed,
+      fallbackOccurred: aiResult.fallbackOccurred,
+      fallbackReason: aiResult.fallbackReason,
       hasImageAttachment: aiResult.hasImageAttachment,
-      hasDocumentContext: aiResult.hasDocumentContext
+      hasDocumentContext: aiResult.hasDocumentContext,
+      quotaWarning: quotaCheck.warning
     });
   } catch (error) {
     console.error('AI chat processing error:', error);
+    await usageLedgerService.recordUsage({
+      userId,
+      featureCategory: 'CONVERSATIONAL_CHAT',
+      provider: 'auto',
+      status: 'FAILURE',
+      errorCategory: error.message?.includes('429') ? 'RESOURCE_EXHAUSTED' : 'SERVER_ERROR',
+      ipAddress: req.ip
+    });
     res.status(500).json({ message: error.message || 'Error processing AI question.' });
   }
 };

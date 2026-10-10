@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
 import api from '../api/axios';
 import {
   Search, Bot, Sparkles, BookOpen, FileText, ExternalLink,
@@ -28,7 +29,15 @@ export default function PublicSearch() {
   const [selectedImageModal, setSelectedImageModal] = useState(null);
 
   // Conversational AI State
-  const [aiProvider, setAiProvider] = useState('gemini');
+  const [aiProvider, setAiProvider] = useState('auto');
+  const [selectedModel, setSelectedModel] = useState('auto');
+  const [availableModels, setAvailableModels] = useState([
+    { id: 'auto', name: 'Auto (Smart Multi-Provider)', badge: 'Recommended' },
+    { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', badge: 'Fast & Smart' },
+    { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', badge: 'High Throughput' },
+    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', badge: 'Multimodal' },
+    { id: 'openrouter-default', name: 'OpenRouter AI', badge: 'Fallback' }
+  ]);
   const [includeWebSearch, setIncludeWebSearch] = useState(true);
   const [activeConversationId, setActiveConversationId] = useState(null);
   const [chatMessages, setChatMessages] = useState([]); // [{ role: 'user'|'assistant', content, attachment, citations, grounding, timestamp }]
@@ -62,10 +71,22 @@ export default function PublicSearch() {
     chatBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatMessages, loading]);
 
-  // Load featured public resources on mount
+  // Load featured public resources and models on mount
   useEffect(() => {
     fetchFeaturedResources();
+    fetchAvailableModels();
   }, []);
+
+  const fetchAvailableModels = async () => {
+    try {
+      const res = await api.get('/ai/models');
+      if (res.data?.models && Array.isArray(res.data.models)) {
+        setAvailableModels(res.data.models);
+      }
+    } catch (e) {
+      // Fallback to default list if unauthenticated
+    }
+  };
 
   // Fetch search history whenever drawer is opened
   useEffect(() => {
@@ -287,6 +308,7 @@ export default function PublicSearch() {
         formData.append('query', userMsgText);
         if (activeConversationId) formData.append('conversationId', activeConversationId);
         formData.append('provider', aiProvider);
+        formData.append('model', selectedModel);
         formData.append('includeWebSearch', String(includeWebSearch));
         formData.append('file', currentAttachment.file);
 
@@ -299,6 +321,7 @@ export default function PublicSearch() {
           query: userMsgText,
           conversationId: activeConversationId,
           provider: aiProvider,
+          model: selectedModel,
           includeWebSearch
         });
       }
@@ -315,6 +338,10 @@ export default function PublicSearch() {
         citationDisclaimer: res.data.citationDisclaimer,
         sources: res.data.sources || [],
         providerUsed: res.data.providerUsed,
+        modelUsed: res.data.modelUsed,
+        slotUsed: res.data.slotUsed,
+        fallbackOccurred: res.data.fallbackOccurred,
+        fallbackReason: res.data.fallbackReason,
         timestamp: new Date().toISOString()
       };
 
@@ -922,6 +949,23 @@ export default function PublicSearch() {
               </div>
 
               <div className="flex items-center gap-2">
+                {/* Model Selector Dropdown */}
+                <div className="flex items-center gap-1.5 bg-white border border-slate-200 rounded-xl px-2.5 py-1 shadow-2xs">
+                  <Sparkles className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                  <select
+                    value={selectedModel}
+                    onChange={(e) => setSelectedModel(e.target.value)}
+                    className="text-xs font-semibold text-slate-700 bg-transparent focus:outline-hidden cursor-pointer"
+                    title="Select AI routing model"
+                  >
+                    {availableModels.map(m => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} {m.badge ? `(${m.badge})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
                 <button
                   type="button"
                   onClick={handleStartNewChat}
@@ -1034,11 +1078,15 @@ export default function PublicSearch() {
                       )}
 
                       {/* Message Content */}
-                      <div className={`text-xs sm:text-sm leading-relaxed whitespace-pre-line ${
-                        msg.role === 'user' ? 'font-medium text-white' : 'font-normal text-slate-700'
-                      }`}>
-                        {msg.content}
-                      </div>
+                      {msg.role === 'user' ? (
+                        <div className="text-xs sm:text-sm leading-relaxed whitespace-pre-line font-medium text-white">
+                          {msg.content}
+                        </div>
+                      ) : (
+                        <div className="prose-markdown text-xs sm:text-sm text-slate-800 leading-relaxed font-normal">
+                          <ReactMarkdown>{msg.content}</ReactMarkdown>
+                        </div>
+                      )}
 
                       {/* Citations Card (if any) */}
                       {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
@@ -1066,6 +1114,34 @@ export default function PublicSearch() {
                               </div>
                             ))}
                           </div>
+                        </div>
+                      )}
+
+                      {/* Model & Routing Transparency Badge */}
+                      {msg.role === 'assistant' && !msg.isError && (
+                        <div className="pt-2 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-semibold text-slate-600 flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 text-indigo-500" />
+                              {msg.modelUsed || (msg.providerUsed === 'openrouter' ? 'OpenRouter AI' : 'Gemini 2.5 Flash')}
+                            </span>
+                            {msg.slotUsed && (
+                              <span className="px-1.5 py-0.2 bg-slate-100 rounded text-[9px] text-slate-500 font-mono">
+                                {msg.slotUsed}
+                              </span>
+                            )}
+                            {msg.fallbackOccurred && (
+                              <span className="px-2 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded-full font-bold flex items-center gap-1">
+                                <RefreshCw className="w-2.5 h-2.5 text-amber-600" />
+                                Fallback Engaged
+                              </span>
+                            )}
+                          </div>
+                          {msg.fallbackReason && (
+                            <span className="text-amber-600 italic truncate max-w-xs" title={msg.fallbackReason}>
+                              {msg.fallbackReason}
+                            </span>
+                          )}
                         </div>
                       )}
 
