@@ -4,11 +4,11 @@ const axios = require('axios');
 const crypto = require('crypto');
 const { getCloudinaryType } = require('../utils/textExtractor');
 
-// Helper: Check if a faculty/mentor is authorized to review a student's resource
+// Helper: Check if a faculty/mentor/admin is authorized to review a student/public resource
 async function checkApproverAuthorization(userId, userRole, userDeptId, resource) {
-  // 1. Student can NEVER approve/reject
-  if (userRole === 'STUDENT') {
-    return { authorized: false, reason: 'Students cannot approve or reject resources.' };
+  // 1. Student or Public user can NEVER approve/reject
+  if (userRole === 'STUDENT' || userRole === 'PUBLIC_USER') {
+    return { authorized: false, reason: 'Public users and students cannot approve or reject resources.' };
   }
 
   // 2. Prevent self-approval if somehow uploader is the reviewer
@@ -16,22 +16,29 @@ async function checkApproverAuthorization(userId, userRole, userDeptId, resource
     return { authorized: false, reason: 'You cannot approve or reject your own uploaded resource.' };
   }
 
-  // 3. Super Admin & Institute Admin always authorized within institute
+  // 3. Super Admin & Institute Admin always authorized
   if (userRole === 'SUPER_ADMIN' || userRole === 'INSTITUTE_ADMIN') {
     return { authorized: true, roleLabel: 'Administrator' };
   }
 
-  // 4. HOD of the department
-  if (userRole === 'HOD' && userDeptId === resource.department_id) {
+  // 4. Community courses or public resources (where department_id is null or is_public is true)
+  if (resource.public_course_id || resource.is_public || !resource.department_id || resource.course_category_type === 'COMMUNITY_COURSE') {
+    if (userRole === 'HOD' || userRole === 'FACULTY') {
+      return { authorized: true, roleLabel: userRole === 'HOD' ? 'HOD' : 'Faculty' };
+    }
+  }
+
+  // 5. HOD of the department
+  if (userRole === 'HOD' && resource.department_id && userDeptId === resource.department_id) {
     return { authorized: true, roleLabel: 'HOD' };
   }
 
-  // 5. Faculty in the same department (assigned to subject's department)
-  if (userRole === 'FACULTY' && userDeptId === resource.department_id) {
+  // 6. Faculty in the same department (assigned to subject's department)
+  if (userRole === 'FACULTY' && resource.department_id && userDeptId === resource.department_id) {
     return { authorized: true, roleLabel: 'Faculty' };
   }
 
-  // 6. Assigned Mentor of the student (from mentor_students)
+  // 7. Assigned Mentor of the student (from mentor_students)
   const mentorCheck = await db.query(
     'SELECT 1 FROM mentor_students WHERE mentor_id = $1 AND student_id = $2',
     [userId, resource.uploaded_by]
@@ -296,22 +303,25 @@ exports.getApprovedResources = async (req, res) => {
       SELECT 
         sr.id, sr.title, sr.description, sr.tags, sr.semester,
         sr.file_name, sr.file_url, sr.file_type, sr.file_size,
-        sr.source_type, sr.status, sr.is_public, sr.created_at, sr.updated_at,
-        sr.approved_at, sr.approved_by,
+        sr.external_url, sr.external_provider, sr.external_metadata,
+        sr.source_type, sr.status, sr.is_public, sr.course_category_type,
+        sr.created_at, sr.updated_at, sr.approved_at, sr.approved_by,
         s.id as subject_id, s.name as subject_name, s.code as subject_code,
         u.id as unit_id, u.title as unit_title, u.unit_number,
         l.id as lesson_id, l.title as lesson_title, l.lesson_number,
         t.id as topic_id, t.title as topic_title, t.topic_number,
         d.id as department_id, d.name as department_name,
+        pc.id as public_course_id, pc.name as public_course_name,
         up.id as uploader_id, up.name as uploader_name, up.role as uploader_role, 
         up.designation as uploader_designation, up.roll_number as uploader_roll_number,
         ap.name as approver_name, ap.role as approver_role, ap.designation as approver_designation
       FROM student_resources sr
-      JOIN subjects s ON sr.subject_id = s.id
-      JOIN units u ON sr.unit_id = u.id
-      JOIN lessons l ON sr.lesson_id = l.id
-      JOIN topics t ON sr.topic_id = t.id
-      JOIN departments d ON sr.department_id = d.id
+      LEFT JOIN subjects s ON sr.subject_id = s.id
+      LEFT JOIN units u ON sr.unit_id = u.id
+      LEFT JOIN lessons l ON sr.lesson_id = l.id
+      LEFT JOIN topics t ON sr.topic_id = t.id
+      LEFT JOIN departments d ON sr.department_id = d.id
+      LEFT JOIN public_courses pc ON sr.public_course_id = pc.id
       JOIN users up ON sr.uploaded_by = up.id
       LEFT JOIN users ap ON sr.approved_by = ap.id
       WHERE sr.status = 'APPROVED'
@@ -367,6 +377,7 @@ exports.getApprovedResources = async (req, res) => {
         LOWER(sr.title) LIKE $${searchParamIdx} OR
         LOWER(sr.description) LIKE $${searchParamIdx} OR
         LOWER(s.name) LIKE $${searchParamIdx} OR
+        LOWER(pc.name) LIKE $${searchParamIdx} OR
         LOWER(t.title) LIKE $${searchParamIdx} OR
         LOWER(up.name) LIKE $${searchParamIdx} OR
         EXISTS (SELECT 1 FROM unnest(sr.tags) tag WHERE LOWER(tag) LIKE $${searchParamIdx})
@@ -402,13 +413,15 @@ exports.getMyUploads = async (req, res) => {
         u.title as unit_title, u.unit_number,
         l.title as lesson_title, l.lesson_number,
         t.title as topic_title, t.topic_number,
+        pc.name as public_course_name,
         ap.name as approver_name, ap.role as approver_role,
         rp.name as rejector_name, rp.role as rejector_role
       FROM student_resources sr
-      JOIN subjects s ON sr.subject_id = s.id
-      JOIN units u ON sr.unit_id = u.id
-      JOIN lessons l ON sr.lesson_id = l.id
-      JOIN topics t ON sr.topic_id = t.id
+      LEFT JOIN subjects s ON sr.subject_id = s.id
+      LEFT JOIN units u ON sr.unit_id = u.id
+      LEFT JOIN lessons l ON sr.lesson_id = l.id
+      LEFT JOIN topics t ON sr.topic_id = t.id
+      LEFT JOIN public_courses pc ON sr.public_course_id = pc.id
       LEFT JOIN users ap ON sr.approved_by = ap.id
       LEFT JOIN users rp ON sr.rejected_by = rp.id
       WHERE sr.uploaded_by = $1
@@ -433,20 +446,23 @@ exports.getPendingApprovals = async (req, res) => {
     let query = `
       SELECT 
         sr.*,
-        s.name as subject_name, s.code as subject_code,
+        COALESCE(s.name, pc.name, 'Public Community Course') as subject_name,
+        s.code as subject_code,
         u.title as unit_title, u.unit_number,
         l.title as lesson_title, l.lesson_number,
         t.title as topic_title, t.topic_number,
-        d.name as department_name,
+        COALESCE(d.name, 'Open Community') as department_name,
+        pc.name as public_course_name,
         up.name as uploader_name, up.email as uploader_email, up.roll_number as uploader_roll_number,
         ap.name as approver_name, rp.name as rejector_name,
         EXISTS (SELECT 1 FROM mentor_students ms WHERE ms.mentor_id = $1 AND ms.student_id = sr.uploaded_by) as is_my_mentee
       FROM student_resources sr
-      JOIN subjects s ON sr.subject_id = s.id
-      JOIN units u ON sr.unit_id = u.id
-      JOIN lessons l ON sr.lesson_id = l.id
-      JOIN topics t ON sr.topic_id = t.id
-      JOIN departments d ON sr.department_id = d.id
+      LEFT JOIN subjects s ON sr.subject_id = s.id
+      LEFT JOIN units u ON sr.unit_id = u.id
+      LEFT JOIN lessons l ON sr.lesson_id = l.id
+      LEFT JOIN topics t ON sr.topic_id = t.id
+      LEFT JOIN departments d ON sr.department_id = d.id
+      LEFT JOIN public_courses pc ON sr.public_course_id = pc.id
       JOIN users up ON sr.uploaded_by = up.id
       LEFT JOIN users ap ON sr.approved_by = ap.id
       LEFT JOIN users rp ON sr.rejected_by = rp.id
@@ -463,18 +479,32 @@ exports.getPendingApprovals = async (req, res) => {
 
     // Role-based scope
     if (userRole === 'SUPER_ADMIN' || userRole === 'INSTITUTE_ADMIN') {
-      // Sees all in institute
+      // Super Admin and Institute Admin see all institutional materials and all public community submissions
     } else if (userRole === 'HOD') {
-      params.push(userDeptId);
-      query += ` AND sr.department_id = $${params.length}`;
+      if (userDeptId) {
+        params.push(userDeptId);
+        query += ` AND (sr.department_id = $${params.length} OR sr.is_public = TRUE OR sr.public_course_id IS NOT NULL)`;
+      } else {
+        query += ` AND (sr.is_public = TRUE OR sr.public_course_id IS NOT NULL)`;
+      }
     } else if (userRole === 'FACULTY') {
-      // Faculty can review resources for subjects in their department OR from their mentees
-      params.push(userDeptId);
-      const deptParamIdx = params.length;
-      query += ` AND (
-        sr.department_id = $${deptParamIdx} OR 
-        sr.uploaded_by IN (SELECT student_id FROM mentor_students WHERE mentor_id = $1)
-      )`;
+      // Faculty can review resources for subjects in their department OR from their mentees OR open community resources
+      if (userDeptId) {
+        params.push(userDeptId);
+        const deptParamIdx = params.length;
+        query += ` AND (
+          sr.department_id = $${deptParamIdx} OR 
+          sr.is_public = TRUE OR 
+          sr.public_course_id IS NOT NULL OR
+          sr.uploaded_by IN (SELECT student_id FROM mentor_students WHERE mentor_id = $1)
+        )`;
+      } else {
+        query += ` AND (
+          sr.is_public = TRUE OR 
+          sr.public_course_id IS NOT NULL OR
+          sr.uploaded_by IN (SELECT student_id FROM mentor_students WHERE mentor_id = $1)
+        )`;
+      }
     } else {
       return res.status(403).json({ error: 'Only faculty and administrators can access approvals.' });
     }
@@ -498,9 +528,13 @@ exports.approveResource = async (req, res) => {
 
   try {
     const resResult = await db.query(`
-      SELECT sr.*, s.name as subject_name, up.name as uploader_name
+      SELECT sr.*, 
+             COALESCE(s.name, pc.name, 'Public Community Course') as subject_name,
+             pc.name as public_course_name,
+             up.name as uploader_name
       FROM student_resources sr
-      JOIN subjects s ON sr.subject_id = s.id
+      LEFT JOIN subjects s ON sr.subject_id = s.id
+      LEFT JOIN public_courses pc ON sr.public_course_id = pc.id
       JOIN users up ON sr.uploaded_by = up.id
       WHERE sr.id = $1
     `, [id]);
@@ -556,23 +590,23 @@ exports.approveResource = async (req, res) => {
       }
     }
 
-    // Send notification to the student
+    // Send notification to the student/contributor if institutional
     try {
-      const approverName = req.user.name || 'Your faculty mentor';
+      const approverName = req.user.name || 'Academic faculty reviewer';
       const notifTitle = 'Resource Approved! 🎉';
-      const notifMessage = `Your shared resource "${resource.title}" for ${resource.subject_name} has been approved by ${approverName} and is now available to students.`;
+      const notifMessage = `Your shared resource "${resource.title}" (${resource.public_course_name || resource.subject_name || 'Academic Note'}) has been approved by ${approverName} and is now publicly live in the library.`;
 
       await db.query(`
         INSERT INTO notifications 
         (title, message, sender_id, sender_role, recipient_type, recipient_id, institute_id, target_department_id)
         VALUES ($1, $2, $3, $4, 'SPECIFIC_STUDENT', $5, $6, $7)
-      `, [notifTitle, notifMessage, userId, userRole, resource.uploaded_by, req.user.institute_id, resource.department_id]);
+      `, [notifTitle, notifMessage, userId, userRole, resource.uploaded_by, req.user.institute_id || null, resource.department_id || null]);
     } catch (notifErr) {
       console.warn('[STUDENT_RESOURCES] Notification error:', notifErr.message);
     }
 
     res.json({
-      message: 'Student resource approved successfully and published to students.',
+      message: 'Resource approved successfully and published to the academic library.',
       resource: approvedResource
     });
   } catch (err) {
@@ -591,9 +625,12 @@ exports.rejectResource = async (req, res) => {
 
   try {
     const resResult = await db.query(`
-      SELECT sr.*, s.name as subject_name
+      SELECT sr.*, 
+             COALESCE(s.name, pc.name, 'Public Community Course') as subject_name,
+             pc.name as public_course_name
       FROM student_resources sr
-      JOIN subjects s ON sr.subject_id = s.id
+      LEFT JOIN subjects s ON sr.subject_id = s.id
+      LEFT JOIN public_courses pc ON sr.public_course_id = pc.id
       WHERE sr.id = $1
     `, [id]);
 
@@ -603,7 +640,7 @@ exports.rejectResource = async (req, res) => {
 
     const resource = resResult.rows[0];
 
-    // Authorize approver
+    // Authorize reviewer
     const authCheck = await checkApproverAuthorization(userId, userRole, userDeptId, resource);
     if (!authCheck.authorized) {
       return res.status(403).json({ error: authCheck.reason });
@@ -621,28 +658,28 @@ exports.rejectResource = async (req, res) => {
           updated_at = NOW()
       WHERE id = $3
       RETURNING *
-    `, [userId, reason ? reason.trim() : 'Does not meet departmental quality criteria.', id]);
+    `, [userId, reason && reason.trim() ? reason.trim() : 'Does not meet academic quality criteria or guidelines.', id]);
 
     const rejectedResource = updateRes.rows[0];
 
-    // Send rejection notification to the student
+    // Send rejection notification
     try {
       const rejectorName = req.user.name || 'Faculty reviewer';
       const notifTitle = 'Resource Submission Update';
       const reasonText = reason && reason.trim() ? ` Reason: "${reason.trim()}"` : '';
-      const notifMessage = `Your resource submission "${resource.title}" for ${resource.subject_name} was not approved.${reasonText}`;
+      const notifMessage = `Your resource submission "${resource.title}" (${resource.public_course_name || resource.subject_name || 'Academic Note'}) was not approved.${reasonText}`;
 
       await db.query(`
         INSERT INTO notifications 
         (title, message, sender_id, sender_role, recipient_type, recipient_id, institute_id, target_department_id)
         VALUES ($1, $2, $3, $4, 'SPECIFIC_STUDENT', $5, $6, $7)
-      `, [notifTitle, notifMessage, userId, userRole, resource.uploaded_by, req.user.institute_id, resource.department_id]);
+      `, [notifTitle, notifMessage, userId, userRole, resource.uploaded_by, req.user.institute_id || null, resource.department_id || null]);
     } catch (notifErr) {
       console.warn('[STUDENT_RESOURCES] Rejection notification error:', notifErr.message);
     }
 
     res.json({
-      message: 'Student resource has been rejected.',
+      message: 'Resource submission has been rejected with feedback.',
       resource: rejectedResource
     });
   } catch (err) {
@@ -687,8 +724,18 @@ exports.getSignedUrl = async (req, res) => {
       }
     }
 
-    let url = resource.file_url;
-    if (url.includes('/authenticated/') || resource.cloudinary_public_id) {
+    let url = resource.file_url || resource.external_url;
+    if (resource.external_url && !resource.cloudinary_public_id) {
+      return res.json({ 
+        url: resource.external_url, 
+        file_name: resource.file_name || resource.title, 
+        file_type: resource.file_type || 'text/html',
+        is_external: true,
+        external_provider: resource.external_provider
+      });
+    }
+
+    if (url && (url.includes('/authenticated/') || resource.cloudinary_public_id)) {
       const options = {
         resource_type: 'raw',
         type: 'authenticated',
@@ -698,9 +745,9 @@ exports.getSignedUrl = async (req, res) => {
         options.attachment = true;
       }
       url = cloudinary.utils.private_download_url(resource.cloudinary_public_id, '', options);
-    } else {
+    } else if (url) {
       if (req.query.download === 'true') {
-        const filename = encodeURIComponent(resource.file_name);
+        const filename = encodeURIComponent(resource.file_name || 'download');
         url = url.replace('/upload/', `/upload/fl_attachment:${filename}/`);
       }
     }

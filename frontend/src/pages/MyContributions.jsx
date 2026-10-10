@@ -72,7 +72,7 @@ export default function MyContributions() {
           className="px-4 py-2.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 text-white text-xs font-bold rounded-2xl shadow-sm transition-all flex items-center gap-2 shrink-0 cursor-pointer"
         >
           <Plus className="w-4 h-4" />
-          <span>+ Add Public Material</span>
+          <span> Add Public Material</span>
         </button>
       </div>
 

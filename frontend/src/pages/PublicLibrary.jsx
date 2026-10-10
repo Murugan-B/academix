@@ -197,9 +197,16 @@ export default function PublicLibrary() {
                       <div className="p-3 bg-indigo-50 text-indigo-600 rounded-2xl group-hover:scale-105 transition-transform">
                         <Folder className="w-6 h-6" />
                       </div>
-                      <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
-                        {course.resource_count || 0} Materials
-                      </span>
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-indigo-50 text-indigo-700 border border-indigo-100">
+                          {course.resource_count || 0} Approved
+                        </span>
+                        {Number(course.pending_count) > 0 && (
+                          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-50 text-amber-700 border border-amber-200 flex items-center gap-1">
+                            <Clock className="w-2.5 h-2.5" /> {course.pending_count} Under Review
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     <div className="space-y-1">

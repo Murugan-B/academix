@@ -38,7 +38,10 @@ exports.getPublicCourses = async (req, res) => {
         pc.category,
         pc.created_at,
         u.name as creator_name,
-        COUNT(sr.id) FILTER (WHERE sr.status = 'APPROVED' AND sr.is_public = TRUE) as resource_count
+        COUNT(sr.id) FILTER (WHERE sr.status = 'APPROVED' AND sr.is_public = TRUE)::int as resource_count,
+        COUNT(sr.id) FILTER (WHERE sr.status = 'PENDING' AND sr.is_public = TRUE)::int as pending_count,
+        COUNT(sr.id) FILTER (WHERE sr.status = 'REJECTED' AND sr.is_public = TRUE)::int as rejected_count,
+        COUNT(sr.id) FILTER (WHERE sr.is_public = TRUE)::int as total_count
       FROM public_courses pc
       LEFT JOIN users u ON pc.created_by = u.id
       LEFT JOIN student_resources sr ON sr.public_course_id = pc.id
@@ -110,10 +113,16 @@ exports.getPublicCourseDetails = async (req, res) => {
 
   try {
     const courseRes = await db.query(
-      `SELECT pc.id, pc.name, pc.description, pc.category, pc.created_at, u.name as creator_name
+      `SELECT 
+         pc.id, pc.name, pc.description, pc.category, pc.created_at, u.name as creator_name,
+         COUNT(sr.id) FILTER (WHERE sr.status = 'APPROVED' AND sr.is_public = TRUE)::int as resource_count,
+         COUNT(sr.id) FILTER (WHERE sr.status = 'PENDING' AND sr.is_public = TRUE)::int as pending_count,
+         COUNT(sr.id) FILTER (WHERE sr.status = 'REJECTED' AND sr.is_public = TRUE)::int as rejected_count
        FROM public_courses pc
        LEFT JOIN users u ON pc.created_by = u.id
-       WHERE pc.id = $1`,
+       LEFT JOIN student_resources sr ON sr.public_course_id = pc.id
+       WHERE pc.id = $1
+       GROUP BY pc.id, u.name`,
       [id]
     );
 
