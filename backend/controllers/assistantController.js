@@ -518,6 +518,8 @@ exports.getProvidersStatus = async (req, res) => {
     const models = routerService.getAvailableModels();
 
     res.json({
+      success: true,
+      systemStatus,
       gemini: { 
         status: systemStatus.gemini.availableSlots > 0 ? 'available' : (systemStatus.gemini.configured ? 'cooling' : 'unavailable'), 
         label: 'Gemini (Google)',
@@ -525,6 +527,7 @@ exports.getProvidersStatus = async (req, res) => {
         configured: systemStatus.gemini.configured,
         totalSlots: systemStatus.gemini.totalSlots,
         availableSlots: systemStatus.gemini.availableSlots,
+        validatedSlots: systemStatus.gemini.validatedSlots,
         slots: systemStatus.gemini.slots
       },
       openrouter: {

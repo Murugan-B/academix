@@ -2,8 +2,7 @@ const db = require('../db');
 const axios = require('axios');
 const pdf = require('pdf-parse');
 const { GoogleGenAI } = require('@google/genai');
-
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const geminiKeyManager = require('../services/ai/geminiKeyManager');
 
 const generateAiSummary = async (resourceId, fileUrl) => {
   console.log(`Starting background AI processing for resource: ${resourceId}`);
@@ -23,12 +22,24 @@ const generateAiSummary = async (resourceId, fileUrl) => {
     }
 
     const generateWithFallback = async (contents) => {
-      const candidates = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.8-flash'];
+      const candidates = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+      const slot = geminiKeyManager.acquireKey([]);
+      const apiKey = slot ? slot.key : (process.env.GEMINI_API_KEY || '');
+      
+      if (!apiKey) {
+        throw new Error('No Gemini API key available in geminiKeyManager or process.env');
+      }
+
+      const ai = new GoogleGenAI({ apiKey });
+
       for (const m of candidates) {
         try {
-          return await ai.models.generateContent({ model: m, contents });
+          const res = await ai.models.generateContent({ model: m, contents });
+          if (slot) geminiKeyManager.recordSuccess(slot.slotId);
+          return res;
         } catch (e) {
           console.warn(`[aiHelpers] Model ${m} failed: ${e.message}`);
+          if (slot) geminiKeyManager.recordFailure(slot.slotId, e);
         }
       }
       throw new Error('All candidate models failed in aiHelpers');

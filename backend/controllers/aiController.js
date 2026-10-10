@@ -231,8 +231,10 @@ exports.getChatHistory = async (req, res) => {
 
 exports.getHealth = async (req, res) => {
   try {
-    const geminiKey = !!process.env.GEMINI_API_KEY;
-    const openrouterKey = !!process.env.OPENROUTER_API_KEY;
+    const geminiKeyManager = require('../services/ai/geminiKeyManager');
+    const routerService = require('../services/ai/routerService');
+    const isGemini = geminiKeyManager.hasConfiguredKeys();
+    const isOpenRouter = routerService.isOpenRouterConfigured();
 
     let indexedMaterials = 0;
     let vectorChunks = 0;
@@ -248,12 +250,12 @@ exports.getHealth = async (req, res) => {
     }
 
     res.json({
-      status: (geminiKey || openrouterKey) ? 'ok' : 'unavailable',
-      provider: geminiKey ? 'gemini' : (openrouterKey ? 'openrouter' : 'none'),
+      status: (isGemini || isOpenRouter) ? 'ok' : 'unavailable',
+      provider: isGemini ? 'gemini' : (isOpenRouter ? 'openrouter' : 'none'),
       model: process.env.OPENROUTER_MODEL || 'gemini-2.5-flash',
       providers: {
-        gemini: geminiKey ? 'available' : 'unavailable',
-        openrouter: openrouterKey ? 'available' : 'unavailable'
+        gemini: isGemini ? 'available' : 'unavailable',
+        openrouter: isOpenRouter ? 'available' : 'unavailable'
       },
       indexedMaterials,
       vectorChunks

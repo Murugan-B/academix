@@ -25,11 +25,11 @@ router.get('/quota/ledger', authMiddleware, roleMiddleware(['SUPER_ADMIN', 'INST
 // 4. Admin Update Quota Limits
 router.put('/quota/configs/:featureCategory', authMiddleware, roleMiddleware(['SUPER_ADMIN', 'INSTITUTE_ADMIN']), aiQuotaController.updateQuotaConfig);
 
-// 5. Admin AI Model Routing & Key Slots Diagnostic
-router.get('/quota/routing-config', authMiddleware, roleMiddleware(['SUPER_ADMIN', 'INSTITUTE_ADMIN']), aiQuotaController.getRoutingConfig);
+// 5. AI Model Routing & Key Slots Diagnostic (Safe for all authenticated users)
+router.get('/quota/routing-config', authMiddleware, aiQuotaController.getRoutingConfig);
 
-// 6. Admin Trigger Live AI Routing Health Check
-router.post('/quota/health-check', authMiddleware, roleMiddleware(['SUPER_ADMIN', 'INSTITUTE_ADMIN']), aiQuotaController.testRoutingHealth);
+// 6. Trigger Live AI Routing Health Check (Admin & Faculty)
+router.post('/quota/health-check', authMiddleware, roleMiddleware(['SUPER_ADMIN', 'INSTITUTE_ADMIN', 'HOD', 'FACULTY']), aiQuotaController.testRoutingHealth);
 
 // 7. Public & Authenticated Available Models
 router.get('/models', (req, res) => {

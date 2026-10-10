@@ -3,6 +3,7 @@ const axios = require('axios');
 const db = require('../../db');
 const { searchWeb } = require('../search/searchService');
 const { classifyQuery } = require('./freshnessService');
+const geminiKeyManager = require('./geminiKeyManager');
 const pdfParse = require('pdf-parse');
 const mammoth = require('mammoth');
 
@@ -56,16 +57,9 @@ class ConversationalService {
    * Supports Multimodal Image Understanding
    */
   async _callGemini(systemPrompt, messages, imageAttachment = null) {
-    if (!process.env.GEMINI_API_KEY) {
+    if (!geminiKeyManager.hasConfiguredKeys()) {
       throw new Error('GEMINI_API_KEY is not configured in the backend environment.');
     }
-
-    if (Date.now() < this.geminiQuotaExhaustedUntil) {
-      throw new Error('Gemini quota is currently exhausted. Skipping to OpenRouter fallback.');
-    }
-
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    let lastError = null;
 
     const contents = messages.map((m, idx) => {
       const isLastUserMsg = (idx === messages.length - 1) && (m.role === 'user');
@@ -86,36 +80,41 @@ class ConversationalService {
       };
     });
 
-    for (let i = 0; i < this.candidateGeminiModels.length; i++) {
-      const model = this.candidateGeminiModels[i];
-      try {
-        const response = await ai.models.generateContent({
-          model,
-          contents,
-          config: {
-            systemInstruction: systemPrompt,
-            temperature: 0.7
-          }
-        });
-        return response.text;
-      } catch (err) {
-        lastError = err;
-        const msg = err.message || String(err);
-        
-        if (msg.includes('RESOURCE_EXHAUSTED') || msg.includes('429') || msg.includes('Quota exceeded') || msg.includes('rate-limits')) {
-          // Cooldown for 15 minutes before retrying Gemini to avoid repeated failing network requests
-          this.geminiQuotaExhaustedUntil = Date.now() + 15 * 60 * 1000;
-          console.warn(`[ConversationalAI] Gemini quota exhausted on model "${model}". Setting 15m cooldown and switching to OpenRouter.`);
-          break;
-        }
+    let lastError = null;
 
-        console.warn(`[ConversationalAI] Gemini model "${model}" notice (${i + 1}/${this.candidateGeminiModels.length}): ${msg}`);
-        if (i < this.candidateGeminiModels.length - 1) {
-          await new Promise(r => setTimeout(r, 200));
-          continue;
+    for (const model of this.candidateGeminiModels) {
+      const attemptedSlots = [];
+
+      while (true) {
+        const slot = geminiKeyManager.acquireKey(attemptedSlots);
+        if (!slot) break;
+        attemptedSlots.push(slot.slotId);
+
+        try {
+          const ai = new GoogleGenAI({ apiKey: slot.key });
+          const response = await ai.models.generateContent({
+            model,
+            contents,
+            config: {
+              systemInstruction: systemPrompt,
+              temperature: 0.7
+            }
+          });
+          geminiKeyManager.recordSuccess(slot.slotId);
+          return response.text;
+        } catch (err) {
+          lastError = err;
+          const msg = err?.message || String(err);
+          console.warn(`[ConversationalAI] Gemini slot ${slot.slotId} model "${model}" error: ${msg}`);
+          const failResult = geminiKeyManager.recordFailure(slot.slotId, err);
+          if (failResult.isQuota || failResult.isInvalid) {
+            continue;
+          }
+          break;
         }
       }
     }
+
     throw lastError || new Error('Failed to generate response using Gemini models.');
   }
 

@@ -7,14 +7,25 @@ class OpenRouterProvider extends AIProvider {
     this.modelName = process.env.OPENROUTER_MODEL || 'openrouter/free';
   }
 
+  _getApiKey() {
+    const raw = process.env.OPENROUTER_API_KEY || process.env.OPEN_ROUTER_API_KEY || process.env.OPENROUTER_KEY || '';
+    if (!raw || typeof raw !== 'string') return '';
+    let cleaned = raw.trim().replace(/^['"]+|['"]+$/g, '').trim();
+    if (cleaned === 'your_new_key_here' || cleaned === 'your_api_key_here' || cleaned === 'not-configured') {
+      return '';
+    }
+    return cleaned;
+  }
+
   _isConfigured() {
-    return !!(process.env.OPENROUTER_API_KEY && process.env.OPENROUTER_API_KEY.trim() && process.env.OPENROUTER_API_KEY !== 'your_new_key_here');
+    return !!this._getApiKey();
   }
 
   _getClient() {
+    const apiKey = this._getApiKey();
     return new OpenAI({
       baseURL: process.env.OPENROUTER_BASE_URL || 'https://openrouter.ai/api/v1',
-      apiKey: process.env.OPENROUTER_API_KEY || 'not-configured',
+      apiKey: apiKey || 'not-configured',
       defaultHeaders: {
         'HTTP-Referer': 'https://academix.app',
         'X-Title': 'Academix'

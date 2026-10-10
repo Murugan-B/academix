@@ -50,15 +50,36 @@ export default function Settings() {
   useEffect(() => {
     fetchHealthData();
     fetchQuotaData();
-    if (isAdmin) {
-      fetchRoutingData();
-    }
+    fetchRoutingData();
   }, []);
+
+  useEffect(() => {
+    if (activeTab === 'system') {
+      fetchRoutingData();
+      fetchHealthData();
+    }
+  }, [activeTab]);
 
   const fetchRoutingData = async () => {
     try {
-      const res = await api.get('/ai/quota/routing-config');
-      setRoutingData(res.data);
+      let res = null;
+      try {
+        res = await api.get('/ai/quota/routing-config');
+      } catch (err) {
+        res = await api.get('/ai/assistant/providers-status').catch(() => null);
+      }
+
+      if (res && res.data) {
+        const raw = res.data;
+        const systemStatus = raw.systemStatus || {
+          gemini: raw.gemini || {},
+          openrouter: raw.openrouter || {}
+        };
+        setRoutingData({
+          ...raw,
+          systemStatus
+        });
+      }
     } catch (e) {
       console.warn('Failed to load routing config:', e.message);
     }
@@ -71,6 +92,7 @@ export default function Settings() {
       const res = await api.post('/ai/quota/health-check', { model: 'auto' });
       setHealthCheckResult(res.data);
       fetchRoutingData(); // Refresh slots status after ping
+      fetchHealthData();
     } catch (err) {
       setHealthCheckResult({
         success: false,
@@ -735,15 +757,25 @@ export default function Settings() {
                         }`} />
                         <span className="text-xs font-black text-slate-800 uppercase tracking-wider">{slot.slotId}</span>
                       </div>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
-                        slot.status === 'COOLDOWN'
-                          ? 'bg-amber-100 text-amber-800 border border-amber-200'
-                          : slot.status === 'INVALID'
-                          ? 'bg-rose-100 text-rose-800 border border-rose-200'
-                          : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                      }`}>
-                        {slot.status === 'COOLDOWN' ? `Cooling (${slot.cooldownRemainingSeconds}s)` : slot.status}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          slot.status === 'COOLDOWN'
+                            ? 'bg-amber-100 text-amber-800 border border-amber-200'
+                            : slot.status === 'INVALID'
+                            ? 'bg-rose-100 text-rose-800 border border-rose-200'
+                            : (slot.validationState === 'VALIDATED' || slot.successCount > 0)
+                            ? 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                            : 'bg-indigo-50 text-indigo-700 border border-indigo-200'
+                        }`}>
+                          {slot.status === 'COOLDOWN' 
+                            ? `Cooling (${slot.cooldownRemainingSeconds}s)` 
+                            : slot.status === 'INVALID' 
+                            ? 'Invalid Key' 
+                            : (slot.validationState === 'VALIDATED' || slot.successCount > 0)
+                            ? 'Validated' 
+                            : 'Configured'}
+                        </span>
+                      </div>
                     </div>
 
                     <div className="space-y-1 text-xs">

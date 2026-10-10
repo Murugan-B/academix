@@ -30,12 +30,32 @@ class SmartAIRouter {
   }
 
   /**
+   * Cleans and sanitizes an OpenRouter API key
+   */
+  getOpenRouterKey() {
+    const raw = process.env.OPENROUTER_API_KEY || process.env.OPEN_ROUTER_API_KEY || process.env.OPENROUTER_KEY || '';
+    if (!raw || typeof raw !== 'string') return '';
+    let cleaned = raw.trim();
+    cleaned = cleaned.replace(/^['"]+|['"]+$/g, '').trim();
+    if (cleaned === 'your_new_key_here' || cleaned === 'your_api_key_here' || cleaned === 'not-configured') {
+      return '';
+    }
+    return cleaned;
+  }
+
+  /**
+   * Returns true if OpenRouter is configured in environment
+   */
+  isOpenRouterConfigured() {
+    return !!this.getOpenRouterKey();
+  }
+
+  /**
    * Returns list of safe selectable models for UI dropdown
    */
   getAvailableModels() {
     const geminiAvailable = geminiKeyManager.getEligibleSlots().length > 0;
-    const openrouterKey = (process.env.OPENROUTER_API_KEY || '').trim();
-    const openrouterAvailable = !!(openrouterKey && openrouterKey !== 'your_new_key_here');
+    const openrouterAvailable = this.isOpenRouterConfigured();
 
     const models = [
       {
@@ -89,14 +109,14 @@ class SmartAIRouter {
    */
   getSystemStatus() {
     const keySlots = geminiKeyManager.getSafeStatus();
-    const openrouterKey = (process.env.OPENROUTER_API_KEY || '').trim();
-    const openrouterConfigured = !!(openrouterKey && openrouterKey !== 'your_new_key_here');
+    const openrouterConfigured = this.isOpenRouterConfigured();
 
     return {
       gemini: {
         configured: geminiKeyManager.hasConfiguredKeys(),
         totalSlots: keySlots.length,
         availableSlots: keySlots.filter(s => s.isAvailable).length,
+        validatedSlots: keySlots.filter(s => s.successCount > 0).length,
         preferredModel: this.geminiCandidateModels[0],
         candidateModels: this.geminiCandidateModels,
         slots: keySlots
@@ -138,19 +158,18 @@ class SmartAIRouter {
     let fallbackReason = null;
 
     // ── Strategy A: Attempt Gemini (if Auto or Gemini requested) ─────────────
-    if (requestedProvider === 'auto' || requestedProvider === 'gemini') {
-      const modelsToTry = requestedProvider === 'gemini' && targetGeminiModel
+    if (requestedProvider === 'gemini' || requestedProvider === 'auto') {
+      const candidateGeminiModels = requestedProvider === 'gemini' && targetGeminiModel
         ? [targetGeminiModel, ...this.geminiCandidateModels.filter(m => m !== targetGeminiModel)]
         : this.geminiCandidateModels;
 
-      for (const modelName of modelsToTry) {
+      for (const model of candidateGeminiModels) {
         const attemptedSlots = [];
 
         while (true) {
           const slot = geminiKeyManager.acquireKey(attemptedSlots);
           if (!slot) {
-            // No more available keys for this model
-            break;
+            break; // No more available keys for this model
           }
           attemptedSlots.push(slot.slotId);
 
@@ -158,27 +177,29 @@ class SmartAIRouter {
             const ai = new GoogleGenAI({ apiKey: slot.key });
             const contents = this._buildGeminiContents(messages, imageAttachment);
 
+            const config = {
+              temperature
+            };
+            if (systemPrompt) {
+              config.systemInstruction = systemPrompt;
+            }
+            if (jsonMode) {
+              config.responseMimeType = 'application/json';
+            }
+
             const response = await ai.models.generateContent({
-              model: modelName,
+              model,
               contents,
-              config: {
-                systemInstruction: systemPrompt || undefined,
-                temperature
-              }
+              config
             });
 
             const text = response.text || '';
             geminiKeyManager.recordSuccess(slot.slotId);
 
-            if (modelName !== (preferredModel === 'auto' ? this.geminiCandidateModels[0] : preferredModel)) {
-              fallbackOccurred = true;
-              fallbackReason = `Requested model was busy/exhausted. Generated via ${modelName} on ${slot.slotId}.`;
-            }
-
             return {
               text,
               providerUsed: 'gemini',
-              modelUsed: modelName,
+              modelUsed: model,
               slotUsed: slot.slotId,
               fallbackOccurred,
               fallbackReason,
@@ -186,15 +207,11 @@ class SmartAIRouter {
               estimatedCompletionTokens: Math.ceil(text.length / 4)
             };
           } catch (err) {
+            const errorMsg = err?.message || String(err);
+            errors.push(`[Gemini][${slot.slotId}][${model}] ${errorMsg}`);
+            console.warn(`[SmartAIRouter] Gemini slot ${slot.slotId} model "${model}" error: ${errorMsg}`);
+
             const failResult = geminiKeyManager.recordFailure(slot.slotId, err);
-            errors.push(`[Gemini][${slot.slotId}][${modelName}] ${err.message}`);
-
-            // If non-retryable error (e.g. invalid user prompt format), don't keep rotating keys pointlessly
-            if (err.status === 400 && !err.message.includes('API_KEY')) {
-              throw err;
-            }
-
-            // If quota error on this key, loop to try next key slot
             if (failResult.isQuota) {
               fallbackOccurred = true;
               fallbackReason = `Gemini key (${slot.slotId}) rate limit exceeded. Rotating key...`;
@@ -206,8 +223,8 @@ class SmartAIRouter {
     }
 
     // ── Strategy B: Fallback to OpenRouter ────────────────────────────────────
-    const openrouterKey = (process.env.OPENROUTER_API_KEY || '').trim();
-    if (openrouterKey && openrouterKey !== 'your_new_key_here') {
+    const openrouterKey = this.getOpenRouterKey();
+    if (openrouterKey) {
       const candidateOpenRouterModels = imageAttachment
         ? this.openRouterVisionModels
         : this.openRouterTextModels;
