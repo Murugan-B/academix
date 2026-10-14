@@ -1,6 +1,7 @@
 const db = require('../db');
 const aiService = require('../services/ai/aiService');
 const textExtractor = require('../utils/textExtractor');
+const incrementalRemedialService = require('../services/remedial/incrementalRemedialService');
 
 /**
  * Aggregates cohort-level question-level performance for topics across a department or subject
@@ -354,19 +355,48 @@ Generate a comprehensive, structured Remedial Learning Intervention Package in J
     const remedialPlan = aiService.getProvider(provider)._cleanAndParseJson(aiResult.text);
 
     // 4. Save Draft Plan to DB
+    let savedPlan = null;
     if (subjectId) {
-      await db.query(`
+      const draftRes = await db.query(`
         INSERT INTO cohort_remedial_plans (subject_id, topic_id, topic_tag, created_by, plan_content, status, updated_at)
         VALUES ($1, $2, $3, $4, $5, 'DRAFT', NOW())
         ON CONFLICT DO NOTHING
+        RETURNING *
       `, [subjectId, topicId || null, topicTag, userId, JSON.stringify(remedialPlan)]);
+
+      if (draftRes.rowCount > 0) {
+        savedPlan = draftRes.rows[0];
+      } else {
+        const existingRes = await db.query(
+          `SELECT * FROM cohort_remedial_plans WHERE subject_id = $1 AND topic_tag = $2`,
+          [subjectId, topicTag]
+        );
+        if (existingRes.rowCount > 0) savedPlan = existingRes.rows[0];
+      }
+
+      if (savedPlan) {
+        try {
+          await incrementalRemedialService.registerPlanDependencies({
+            planId: savedPlan.id,
+            planContent: remedialPlan,
+            subjectId,
+            topicId,
+            topicTag,
+            materialId,
+            userId
+          });
+        } catch (depErr) {
+          console.warn('[generateRemedialPlan] Dependency tracking note:', depErr.message);
+        }
+      }
     }
 
     res.json({
       success: true,
       topic: topicTag,
       plan: remedialPlan,
-      status: 'DRAFT'
+      status: 'DRAFT',
+      planId: savedPlan?.id || null
     });
   } catch (err) {
     console.error('generateRemedialPlan error:', err);
@@ -379,10 +409,18 @@ Generate a comprehensive, structured Remedial Learning Intervention Package in J
  */
 exports.getSubjectRemedialPlans = async (req, res) => {
   const { subjectId } = req.params;
+  const user = req.user;
 
   try {
+    const auth = await incrementalRemedialService.verifyAuthorization(subjectId, user);
+    if (!auth.authorized) {
+      return res.status(403).json({ error: auth.reason || 'Access denied to this subject remedial plans.' });
+    }
+
     const plansRes = await db.query(`
-      SELECT p.id, p.subject_id, p.topic_id, p.topic_tag, p.status, p.plan_content, p.created_at, p.updated_at,
+      SELECT p.id, p.subject_id, p.topic_id, p.topic_tag, p.status, p.plan_content,
+             p.version, p.is_stale, p.citations, p.last_incremental_update_at,
+             p.created_at, p.updated_at,
              s.name as subject_name, s.code as subject_code, s.semester,
              u.name as author_name,
              un.unit_number, un.title as unit_title
@@ -448,6 +486,22 @@ exports.saveRemedialPlan = async (req, res) => {
       savedPlan = insertRes.rows[0];
     }
 
+    if (savedPlan) {
+      try {
+        await incrementalRemedialService.registerPlanDependencies({
+          planId: savedPlan.id,
+          planContent,
+          subjectId,
+          topicId,
+          topicTag,
+          materialId: req.body.materialId || req.body.material_id || null,
+          userId
+        });
+      } catch (depErr) {
+        console.warn('[saveRemedialPlan] Dependency tracking note:', depErr.message);
+      }
+    }
+
     res.json({
       success: true,
       message: 'Remedial plan saved successfully.',
@@ -469,7 +523,9 @@ exports.getAllDepartmentRemedialPlans = async (req, res) => {
 
   try {
     let sql = `
-      SELECT p.id, p.subject_id, p.topic_id, p.topic_tag, p.status, p.plan_content, p.created_at, p.updated_at,
+      SELECT p.id, p.subject_id, p.topic_id, p.topic_tag, p.status, p.plan_content,
+             p.version, p.is_stale, p.citations, p.last_incremental_update_at,
+             p.created_at, p.updated_at,
              s.name as subject_name, s.code as subject_code, s.semester,
              u.name as author_name,
              un.unit_number, un.title as unit_title
@@ -484,6 +540,10 @@ exports.getAllDepartmentRemedialPlans = async (req, res) => {
     const params = [];
 
     if (user.role !== 'SUPER_ADMIN') {
+      if (user.institute_id) {
+        params.push(user.institute_id);
+        sql += ` AND s.department_id IN (SELECT id FROM departments WHERE institute_id = $${params.length})`;
+      }
       if (user.department_id) {
         params.push(user.department_id);
         sql += ` AND s.department_id = $${params.length}`;
@@ -507,6 +567,83 @@ exports.getAllDepartmentRemedialPlans = async (req, res) => {
   } catch (err) {
     console.error('getAllDepartmentRemedialPlans error:', err);
     res.status(500).json({ error: err.message || 'Failed to fetch department remedial plans.' });
+  }
+};
+
+/**
+ * GET /api/analytics/cohort/remedial-plans/:planId/dependencies
+ * Inspect granular item decomposition and dependency staleness
+ */
+exports.getPlanDependencies = async (req, res) => {
+  const { planId } = req.params;
+  try {
+    const result = await incrementalRemedialService.evaluatePlanStaleness(planId, req.user);
+    if (!result.authorized) {
+      return res.status(403).json({ error: result.authError || 'Access denied to this remedial plan.' });
+    }
+    res.json(result);
+  } catch (err) {
+    console.error('getPlanDependencies error:', err);
+    res.status(err.status || 500).json({ error: err.message || 'Failed to inspect plan dependencies.' });
+  }
+};
+
+/**
+ * POST /api/analytics/cohort/remedial-plans/:planId/incremental-update
+ * Recompute ONLY stale items without regenerating intact items
+ */
+exports.triggerIncrementalUpdate = async (req, res) => {
+  const { planId } = req.params;
+  const { provider = 'gemini', triggerType = 'MANUAL_TRIGGER', triggerDetails = {}, lockTimeoutMs } = req.body;
+  try {
+    const result = await incrementalRemedialService.recomputePlanIncrementally(planId, {
+      user: req.user,
+      triggerType,
+      triggerDetails,
+      provider,
+      lockTimeoutMs
+    });
+    res.json(result);
+  } catch (err) {
+    console.error('triggerIncrementalUpdate error:', err);
+    res.status(err.status || (err.concurrencyConflict ? 409 : 500)).json({
+      error: err.message || 'Failed to incrementally update remedial plan.',
+      preserved: err.preserved || false,
+      concurrencyConflict: err.concurrencyConflict || false,
+      retryable: err.retryable || false,
+      code: err.code || 'UPDATE_ERROR'
+    });
+  }
+};
+
+/**
+ * GET /api/analytics/cohort/remedial-plans/:planId/audit-history
+ * Inspect audit logs of changes and incremental recomputations
+ */
+exports.getPlanAuditHistory = async (req, res) => {
+  const { planId } = req.params;
+  try {
+    const planRes = await db.query('SELECT subject_id FROM cohort_remedial_plans WHERE id = $1', [planId]);
+    if (planRes.rowCount === 0) return res.status(404).json({ error: 'Remedial plan not found.' });
+
+    const auth = await incrementalRemedialService.verifyAuthorization(planRes.rows[0].subject_id, req.user);
+    if (!auth.authorized) {
+      return res.status(403).json({ error: auth.reason || 'Access denied.' });
+    }
+
+    const logsRes = await db.query(`
+      SELECT l.*, u.name as trigger_user_name, u.email as trigger_user_email
+      FROM remedial_plan_audit_log l
+      LEFT JOIN users u ON l.created_by = u.id
+      WHERE l.plan_id = $1
+      ORDER BY l.created_at DESC
+      LIMIT 50
+    `, [planId]);
+
+    res.json(logsRes.rows);
+  } catch (err) {
+    console.error('getPlanAuditHistory error:', err);
+    res.status(500).json({ error: err.message || 'Failed to fetch plan audit history.' });
   }
 };
 

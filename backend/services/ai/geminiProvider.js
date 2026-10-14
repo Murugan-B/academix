@@ -2,29 +2,49 @@ const AIProvider = require('./aiProvider');
 const { GoogleGenAI } = require('@google/genai');
 const geminiKeyManager = require('./geminiKeyManager');
 
+function sanitizeAiError(msg) {
+  if (!msg || typeof msg !== 'string') return 'Unknown AI provider error';
+  return msg
+    .replace(/key=[a-zA-Z0-9_\-\.]+/gi, 'key=[REDACTED]')
+    .replace(/AIza[0-9A-Za-z-_]{35}/g, '[REDACTED_GEMINI_KEY]')
+    .replace(/sk-or-v1-[a-f0-9]{64}/g, '[REDACTED_OPENROUTER_KEY]')
+    .replace(/Bearer\s+[a-zA-Z0-9_\-\.]+/gi, 'Bearer [REDACTED]')
+    .slice(0, 500);
+}
+
 class GeminiProvider extends AIProvider {
   constructor() {
     super();
-    this.candidateModels = [
-      process.env.GEMINI_PREFERRED_MODEL || 'gemini-2.5-flash',
-      'gemini-2.0-flash',
-      'gemini-1.5-flash',
-      'gemini-1.5-pro'
+    const defaultPreferred = process.env.GEMINI_PREFERRED_MODEL || 'gemini-3.5-flash';
+    // Officially verified supported Gemini models for Google GenAI API v1beta generateContent with JSON mode
+    const verifiedModels = [
+      defaultPreferred,
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.6-flash',
+      'gemini-2.5-flash'
     ];
+    this.candidateModels = Array.from(new Set(verifiedModels.filter(Boolean)));
     this.modelName = this.candidateModels[0];
   }
 
   /**
    * Helper to execute Gemini generation with automatic multi-key rotation and candidate model fallback
    */
-  async _generateContentWithFallback(requestParams) {
+  async _generateContentWithFallback(requestParams = {}) {
     if (!geminiKeyManager.hasConfiguredKeys()) {
       throw new Error('Gemini API key is not configured in backend environment.');
     }
 
+    const { model: overrideModel, ...restParams } = requestParams;
+    const candidateList = Array.from(new Set([
+      overrideModel,
+      ...this.candidateModels
+    ].filter(Boolean)));
+
     let lastError = null;
 
-    for (const model of this.candidateModels) {
+    for (const model of candidateList) {
       const attemptedSlots = [];
 
       while (true) {
@@ -37,16 +57,38 @@ class GeminiProvider extends AIProvider {
         try {
           const ai = new GoogleGenAI({ apiKey: slot.key });
           const response = await ai.models.generateContent({
-            model,
-            ...requestParams
+            ...restParams,
+            model
           });
           geminiKeyManager.recordSuccess(slot.slotId);
           return response;
         } catch (error) {
           lastError = error;
-          const failResult = geminiKeyManager.recordFailure(slot.slotId, error);
           const msg = error?.message || String(error);
-          console.warn(`[Gemini Provider] Slot "${slot.slotId}" Model "${model}" notice: ${msg}`);
+          const sanitizedMsg = sanitizeAiError(msg);
+
+          const isModelUnsupported =
+            error?.status === 404 ||
+            error?.code === 404 ||
+            /not found/i.test(msg) ||
+            /not supported/i.test(msg) ||
+            /no longer available/i.test(msg);
+
+          const isDemandSpike =
+            error?.status === 503 ||
+            error?.code === 503 ||
+            /high demand/i.test(msg) ||
+            /UNAVAILABLE/i.test(msg);
+
+          if (isModelUnsupported || isDemandSpike) {
+            const reason = isModelUnsupported ? 'unsupported/deprecated' : 'experiencing high demand (503)';
+            console.warn(`[Gemini Provider] Model "${model}" is ${reason}. Trying next candidate model...`);
+            // Do not penalize the API key slot; advance immediately to next candidate model
+            break;
+          }
+
+          const failResult = geminiKeyManager.recordFailure(slot.slotId, error);
+          console.warn(`[Gemini Provider] Slot "${slot.slotId}" Model "${model}" notice: ${sanitizedMsg}`);
 
           if (failResult.isQuota) {
             // Rate limited on this key: loop to try next available key
@@ -63,7 +105,11 @@ class GeminiProvider extends AIProvider {
       }
     }
 
-    throw lastError || new Error('All configured Gemini keys and candidate models failed to generate content.');
+    const safeMessage = sanitizeAiError(lastError?.message || 'All configured Gemini keys and candidate models failed to generate content.');
+    const finalErr = new Error(safeMessage);
+    finalErr.status = lastError?.status;
+    finalErr.code = lastError?.code;
+    throw finalErr;
   }
 
   /**
@@ -477,6 +523,34 @@ Return ONLY a JSON object:
     } catch (error) {
       console.error('Gemini generateSmartRevision error:', error);
       throw new Error(`Failed to generate revision cheat sheet: ${error.message}`);
+    }
+  }
+
+  /**
+   * Discovers and lists supported models from the Google GenAI ModelService API
+   */
+  async listSupportedModels() {
+    if (!geminiKeyManager.hasConfiguredKeys()) {
+      return { success: false, error: 'No Gemini API keys configured' };
+    }
+    const slot = geminiKeyManager.acquireKey([]);
+    if (!slot) {
+      return { success: false, error: 'No available active Gemini key slots' };
+    }
+    try {
+      const ai = new GoogleGenAI({ apiKey: slot.key });
+      const pager = await ai.models.list({ config: { pageSize: 100 } });
+      const models = [];
+      for await (const m of pager) {
+        models.push({
+          name: m.name,
+          displayName: m.displayName,
+          supportedActions: m.supportedActions
+        });
+      }
+      return { success: true, models };
+    } catch (err) {
+      return { success: false, error: sanitizeAiError(err.message) };
     }
   }
 }

@@ -375,6 +375,12 @@ exports.uploadMaterial = async (req, res) => {
         );
         
         const savedMaterial = dbResult.rows[0];
+
+        try {
+          const incrementalRemedialService = require('../services/remedial/incrementalRemedialService');
+          incrementalRemedialService.notifyMaterialChange({ materialId: savedMaterial.id, topicId }).catch(() => {});
+        } catch (e) {}
+
         res.status(201).json(savedMaterial);
 
         // Run extraction & embedding in the background if using Local AI
@@ -462,6 +468,12 @@ exports.deleteMaterial = async (req, res) => {
     // Delete the database record
     await db.query('DELETE FROM materials WHERE id = $1', [materialId]);
     console.log(`[DELETE] Material ${materialId} deleted by user ${userId} (${userRole})`);
+
+    // Notify remedial update engine of deleted material
+    try {
+      const incrementalRemedialService = require('../services/remedial/incrementalRemedialService');
+      incrementalRemedialService.notifyMaterialChange({ materialId, topicId: material.topic_id }).catch(() => {});
+    } catch (e) {}
 
     res.json({ message: 'Material deleted successfully.' });
   } catch (err) {

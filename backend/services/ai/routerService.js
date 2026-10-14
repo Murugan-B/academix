@@ -4,12 +4,14 @@ const geminiKeyManager = require('./geminiKeyManager');
 
 class SmartAIRouter {
   constructor() {
-    this.geminiCandidateModels = [
-      process.env.GEMINI_PREFERRED_MODEL || 'gemini-2.5-flash',
-      'gemini-2.0-flash',
-      'gemini-1.5-flash',
-      'gemini-1.5-pro'
-    ];
+    const defaultPreferred = process.env.GEMINI_PREFERRED_MODEL || 'gemini-3.5-flash';
+    this.geminiCandidateModels = Array.from(new Set([
+      defaultPreferred,
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.6-flash',
+      'gemini-2.5-flash'
+    ].filter(Boolean)));
 
     this.openRouterTextModels = [
       process.env.OPENROUTER_MODEL,
@@ -76,20 +78,20 @@ class SmartAIRouter {
         badge: 'Fast & Smart'
       },
       {
-        id: 'gemini-1.5-flash',
-        name: 'Gemini 1.5 Flash',
+        id: 'gemini-3.5-flash',
+        name: 'Gemini 3.5 Flash',
         provider: 'gemini',
         supportsVision: true,
         status: geminiAvailable ? 'available' : 'unavailable',
         badge: 'High Throughput'
       },
       {
-        id: 'gemini-2.0-flash',
-        name: 'Gemini 2.0 Flash',
+        id: 'gemini-3.5-flash-lite',
+        name: 'Gemini 3.5 Flash Lite',
         provider: 'gemini',
         supportsVision: true,
         status: geminiAvailable ? 'available' : 'unavailable',
-        badge: 'Multimodal'
+        badge: 'Lightweight'
       },
       {
         id: 'openrouter-default',
@@ -211,12 +213,25 @@ class SmartAIRouter {
             errors.push(`[Gemini][${slot.slotId}][${model}] ${errorMsg}`);
             console.warn(`[SmartAIRouter] Gemini slot ${slot.slotId} model "${model}" error: ${errorMsg}`);
 
+            const isModelUnsupported =
+              err?.status === 404 ||
+              err?.code === 404 ||
+              /not found/i.test(errorMsg) ||
+              /not supported/i.test(errorMsg) ||
+              /no longer available/i.test(errorMsg);
+
+            if (isModelUnsupported) {
+              console.warn(`[SmartAIRouter] Model "${model}" is unsupported or deprecated. Advancing to next candidate model...`);
+              break;
+            }
+
             const failResult = geminiKeyManager.recordFailure(slot.slotId, err);
             if (failResult.isQuota) {
               fallbackOccurred = true;
               fallbackReason = `Gemini key (${slot.slotId}) rate limit exceeded. Rotating key...`;
               continue;
             }
+            break;
           }
         }
       }

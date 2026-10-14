@@ -272,6 +272,19 @@ exports.submitAttempt = async (req, res) => {
       );
       
       await client.query('COMMIT');
+
+      // Asynchronously trigger reactive change detection for affected topics
+      try {
+        const incrementalRemedialService = require('../services/remedial/incrementalRemedialService');
+        const affectedTags = new Set([...weakTopics]);
+        questions.forEach(q => { if (q.topic_tag) affectedTags.add(q.topic_tag); });
+        for (const tag of affectedTags) {
+          incrementalRemedialService.notifyAssessmentChange({ topicTag: tag }).catch(() => {});
+        }
+      } catch (notifyErr) {
+        // Non-blocking notification
+      }
+
       res.json({ message: 'Submitted', score: correct, percentage, status, weakTopics, recommendation, attemptId });
     } catch (e) {
       await client.query('ROLLBACK');

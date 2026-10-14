@@ -22,7 +22,7 @@ const generateAiSummary = async (resourceId, fileUrl) => {
     }
 
     const generateWithFallback = async (contents) => {
-      const candidates = ['gemini-2.5-flash', 'gemini-2.0-flash', 'gemini-1.5-flash'];
+      const candidates = ['gemini-2.5-flash', 'gemini-3.5-flash', 'gemini-3.5-flash-lite', 'gemini-3.6-flash'];
       const slot = geminiKeyManager.acquireKey([]);
       const apiKey = slot ? slot.key : (process.env.GEMINI_API_KEY || '');
       

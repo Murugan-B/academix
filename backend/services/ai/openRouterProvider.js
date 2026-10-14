@@ -75,6 +75,25 @@ class OpenRouterProvider extends AIProvider {
     return cleaned;
   }
 
+  /**
+   * Universal provider interface compatibility method
+   */
+  async _generateContentWithFallback(requestParams = {}) {
+    const contents = requestParams.contents || '';
+    const isJson = requestParams.config?.responseMimeType === 'application/json';
+    const messages = [{ role: 'user', content: contents }];
+    const text = await this._chat(messages, isJson);
+    return { text };
+  }
+
+  /**
+   * Helper to safely parse JSON from model output
+   */
+  _cleanAndParseJson(text) {
+    const cleaned = this._cleanJson(text);
+    return JSON.parse(cleaned);
+  }
+
   async summarizeContent(text) {
     console.log('[AI][OpenRouter] task=summary');
     const messages = [

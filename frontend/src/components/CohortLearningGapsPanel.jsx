@@ -5,7 +5,7 @@ import {
   AlertTriangle, CheckCircle2, TrendingUp, Sparkles, BookOpen, Users,
   Layers, RefreshCw, ChevronRight, ChevronDown, X, Check, Target, Lightbulb,
   FileText, ArrowRight, Search, Bookmark, ChevronLeft, Calendar, ShieldCheck,
-  RotateCcw, Save, Loader2, ArrowUpRight, Folder, FolderOpen
+  RotateCcw, Save, Loader2, ArrowUpRight, Folder, FolderOpen, History
 } from 'lucide-react';
 import api from '../api/axios';
 import { toast } from './Toast';
@@ -14,6 +14,60 @@ const showToast = (msg, type = 'info') => {
   if (type === 'success') toast.success(msg);
   else if (type === 'error') toast.error(msg);
   else toast.info(msg);
+};
+
+/**
+ * Safely extracts string display text from any value (string, object with content/text/description/etc.)
+ * Prevents React child invalid object crash: Objects are not valid as a React child (found: object with keys {content})
+ */
+const getDisplayText = (val) => {
+  if (val === null || val === undefined) return '';
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val);
+  if (typeof val === 'object') {
+    if (typeof val.content === 'string') return val.content;
+    if (typeof val.text === 'string') return val.text;
+    if (typeof val.description === 'string') return val.description;
+    if (typeof val.explanation === 'string') return val.explanation;
+    if (typeof val.message === 'string') return val.message;
+    if (typeof val.problem === 'string') {
+      return val.solutionGuidance ? `${val.problem}\n\nSolution Guidance: ${val.solutionGuidance}` : val.problem;
+    }
+    try {
+      return JSON.stringify(val, null, 2);
+    } catch (e) {
+      return String(val);
+    }
+  }
+  return String(val);
+};
+
+/**
+ * Safely extracts an array of display items from a list or object
+ */
+const getDisplayList = (val) => {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'object') {
+    if (Array.isArray(val.content)) return val.content;
+    if (Array.isArray(val.items)) return val.items;
+    if (typeof val.content === 'string') return [val.content];
+    return [getDisplayText(val)];
+  }
+  return [String(val)];
+};
+
+/**
+ * Safely extracts questions array
+ */
+const getDisplayQuestions = (val) => {
+  if (!val) return [];
+  if (Array.isArray(val)) return val;
+  if (typeof val === 'object') {
+    if (Array.isArray(val.content)) return val.content;
+    if (Array.isArray(val.questions)) return val.questions;
+  }
+  return [];
 };
 
 export default function CohortLearningGapsPanel() {
@@ -29,7 +83,9 @@ export default function CohortLearningGapsPanel() {
   // Filter & Search States
   const [selectedSemesterFilter, setSelectedSemesterFilter] = useState('ALL');
   const [searchQuery, setSearchQuery] = useState('');
+  const [showSearchDropdown, setShowSearchDropdown] = useState(false);
   const [savedPlansSearchQuery, setSavedPlansSearchQuery] = useState('');
+  const searchContainerRef = useRef(null);
 
   // Expanded Sections in Main View
   const [expandedSemesters, setExpandedSemesters] = useState({});
@@ -56,6 +112,28 @@ export default function CohortLearningGapsPanel() {
   const [loadingSavedPlans, setLoadingSavedPlans] = useState(false);
   const [viewingSavedPlan, setViewingSavedPlan] = useState(null);
 
+  // Remedial Incremental Updates & Concurrency Control
+  const currentUser = useMemo(() => {
+    try {
+      const u = localStorage.getItem('user');
+      return u ? JSON.parse(u) : null;
+    } catch (e) {
+      return null;
+    }
+  }, []);
+
+  const isAuthorizedMentor = useMemo(() => {
+    return ['HOD', 'FACULTY', 'INSTITUTE_ADMIN', 'SUPER_ADMIN'].includes(currentUser?.role);
+  }, [currentUser]);
+
+  const [isRecomputing, setIsRecomputing] = useState(false);
+  const [recomputeError, setRecomputeError] = useState(null);
+  const [recomputeNotice, setRecomputeNotice] = useState(null);
+  const [recomputeSuccessInfo, setRecomputeSuccessInfo] = useState(null);
+  const [planDependencies, setPlanDependencies] = useState(null);
+  const [auditLogs, setAuditLogs] = useState([]);
+  const [showAuditHistory, setShowAuditHistory] = useState(false);
+
   const topicRefs = useRef({});
 
   // Lock background scroll when any modal is open
@@ -68,6 +146,26 @@ export default function CohortLearningGapsPanel() {
       };
     }
   }, [showRemedialModal, viewingSavedPlan]);
+
+  // Handle click outside and Escape key to close global search dropdown
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (searchContainerRef.current && !searchContainerRef.current.contains(e.target)) {
+        setShowSearchDropdown(false);
+      }
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setShowSearchDropdown(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('mousedown', handleClickOutside);
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
 
   const fetchCohortGaps = async () => {
     setLoading(true);
@@ -328,22 +426,24 @@ export default function CohortLearningGapsPanel() {
   // Handle clicking a search result topic -> auto open semester, subject, unit, and focus topic
   const handleSearchResultClick = (topic) => {
     setSearchQuery('');
+    setShowSearchDropdown(false);
     
     // 1. Expand semester
-    const semNum = topic.semester || 1;
+    const semNum = parseInt(topic.semester || 1, 10);
     setExpandedSemesters(prev => ({ ...prev, [semNum]: true }));
     setSelectedSemesterFilter('ALL');
 
     // 2. Select subject
-    const semObj = hierarchicalData.semesters.find(s => s.semester === semNum);
-    const subObj = semObj?.subjects.find(s => s.id === topic.subject_id);
+    const semObj = hierarchicalData.semesters.find(s => parseInt(s.semester, 10) === semNum);
+    const subObj = semObj?.subjects.find(s => String(s.id) === String(topic.subject_id)) ||
+      hierarchicalData.semesters.flatMap(s => s.subjects).find(s => String(s.id) === String(topic.subject_id));
     if (subObj) {
       setSelectedSubject(subObj);
     }
 
     // 3. Expand unit
     const uNum = topic.unit_number || 1;
-    setExpandedUnits(prev => ({ ...prev, [uNum]: true }));
+    setExpandedUnits(prev => ({ ...prev, [uNum]: true, [topic.unit_id]: true }));
     setSelectedUnit(topic.unit_title);
     setSelectedTopicTag(topic.topicTag);
 
@@ -352,7 +452,7 @@ export default function CohortLearningGapsPanel() {
       if (topicRefs.current[topic.topicTag]) {
         topicRefs.current[topic.topicTag].scrollIntoView({ behavior: 'smooth', block: 'center' });
       }
-    }, 150);
+    }, 250);
   };
 
   // ════════════════════════════════════════════════════════════════════════════
@@ -409,8 +509,155 @@ export default function CohortLearningGapsPanel() {
     }
   };
 
+  const refreshViewingPlan = async (planId) => {
+    try {
+      // 1. Fetch updated dependencies & plan
+      const depRes = await api.get(`/analytics/cohort/remedial-plans/${planId}/dependencies`);
+      if (depRes.data?.plan) {
+        const updatedPlan = depRes.data.plan;
+        if (typeof updatedPlan.plan_content === 'string') {
+          try {
+            updatedPlan.plan_content = JSON.parse(updatedPlan.plan_content);
+          } catch (e) {}
+        }
+        if (typeof updatedPlan.citations === 'string') {
+          try {
+            updatedPlan.citations = JSON.parse(updatedPlan.citations);
+          } catch (e) {}
+        }
+        setViewingSavedPlan(prev => {
+          if (!prev || prev.id !== planId) return prev;
+          return {
+            ...prev,
+            ...updatedPlan,
+            is_stale: depRes.data.isStale ?? updatedPlan.is_stale
+          };
+        });
+      }
+      setPlanDependencies(depRes.data);
+
+      // 2. Fetch updated audit logs
+      const auditRes = await api.get(`/analytics/cohort/remedial-plans/${planId}/audit-history`);
+      setAuditLogs(auditRes.data || []);
+
+      // 3. Refresh saved plans list in background to sync overview cards
+      fetchSavedPlans(selectedSubject?.id || null);
+    } catch (err) {
+      console.error('Failed to refresh viewing plan:', err);
+      if (err.response?.status === 403) {
+        setViewingSavedPlan(null);
+        showToast('Access revoked to this remedial plan.', 'error');
+      }
+    }
+  };
+
   const handleViewSavedPlanDetails = (savedPlan) => {
-    setViewingSavedPlan(savedPlan);
+    const normalized = { ...savedPlan };
+    if (typeof normalized.plan_content === 'string') {
+      try {
+        normalized.plan_content = JSON.parse(normalized.plan_content);
+      } catch (e) {}
+    }
+    if (typeof normalized.citations === 'string') {
+      try {
+        normalized.citations = JSON.parse(normalized.citations);
+      } catch (e) {}
+    }
+    setViewingSavedPlan(normalized);
+    setPlanDependencies(null);
+    setAuditLogs([]);
+    setShowAuditHistory(false);
+    setRecomputeError(null);
+    setRecomputeNotice(null);
+    setRecomputeSuccessInfo(null);
+
+    if (savedPlan.id) {
+      refreshViewingPlan(savedPlan.id);
+    }
+  };
+
+  const handleIncrementalUpdate = async (planId, retryCount = 0) => {
+    if (isRecomputing) return; // Prevent duplicate clicks
+    if (!isAuthorizedMentor) {
+      showToast('You do not have permission to modify this remedial plan.', 'error');
+      return;
+    }
+
+    setIsRecomputing(true);
+    setRecomputeError(null);
+    if (retryCount === 0) {
+      setRecomputeNotice(null);
+      setRecomputeSuccessInfo(null);
+    }
+
+    try {
+      const res = await api.post(`/analytics/cohort/remedial-plans/${planId}/incremental-update`, {
+        triggerType: 'MANUAL_TRIGGER',
+        triggerDetails: { clientInitiated: true, retryCount }
+      });
+
+      const result = res.data;
+      if (result.outcome === 'NO_OP' || !result.updated) {
+        setRecomputeNotice(null);
+        setRecomputeSuccessInfo({ outcome: 'NO_OP', message: result.message || 'Plan is already fully up to date.' });
+        showToast('Plan is already up to date (no-op).', 'info');
+        await refreshViewingPlan(planId);
+      } else {
+        setRecomputeNotice(null);
+        setRecomputeSuccessInfo({
+          outcome: 'SUCCESS',
+          newVersion: result.newPlanVersion,
+          recomputedKeys: result.recomputedItemKeys || [],
+          latencyMs: result.latencyMs
+        });
+        showToast(`✓ Plan updated to v${result.newPlanVersion} (${result.recomputedItemKeys?.length || 0} sections recomputed)`, 'success');
+        await refreshViewingPlan(planId);
+      }
+    } catch (err) {
+      console.error('Incremental update error:', err);
+      const status = err.response?.status;
+      const errData = err.response?.data || {};
+
+      if (status === 403) {
+        // Forbidden: never retry, revoke view to prevent displaying unauthorized material
+        setRecomputeError('Access Denied: You do not have permission to update this remedial plan.');
+        showToast('Access denied: You do not have permission to update this plan.', 'error');
+        setViewingSavedPlan(null);
+        return;
+      }
+
+      const isConflict = status === 409 || errData.concurrencyConflict;
+      const isRetryable = errData.retryable !== false;
+
+      if (isConflict && isRetryable && retryCount === 0) {
+        // First conflict: refresh to latest server state, wait 500ms backoff, retry at most ONCE
+        setRecomputeNotice('Concurrency conflict detected: Plan was updated by another process. Refreshing latest version and retrying...');
+        await refreshViewingPlan(planId);
+
+        // Exponential backoff
+        await new Promise(resolve => setTimeout(resolve, 500));
+
+        // Exactly one automatic retry
+        return await handleIncrementalUpdate(planId, 1);
+      }
+
+      if (isConflict) {
+        // Second consecutive conflict or non-retryable conflict
+        await refreshViewingPlan(planId);
+        setRecomputeNotice(null);
+        setRecomputeError(
+          errData.error ||
+          'Concurrency conflict: The plan was modified again during recomputation. The latest version has been refreshed. Please retry manually.'
+        );
+        showToast('Concurrency conflict. Please retry manually.', 'error');
+      } else {
+        setRecomputeNotice(null);
+        setRecomputeError(errData.error || err.message || 'Failed to incrementally update remedial plan.');
+        showToast(errData.error || err.message || 'Failed to update plan.', 'error');
+      }
+    } finally {
+      setIsRecomputing(false);
+    }
   };
 
   const getScoreBarColor = (acc) => {
@@ -575,7 +822,7 @@ export default function CohortLearningGapsPanel() {
         )}
 
         {/* Global Filter and Search Bar */}
-        <div className="bg-white/90 backdrop-blur-md p-4 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col md:flex-row items-center justify-between gap-4">
+        <div className="relative z-30 bg-white/95 backdrop-blur-md p-4 rounded-2xl border border-slate-200/80 shadow-2xs flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-3 w-full md:w-auto">
             <span className="text-xs font-extrabold uppercase text-slate-500 whitespace-nowrap">
               Semester:
@@ -592,33 +839,52 @@ export default function CohortLearningGapsPanel() {
             </select>
           </div>
 
-          <div className="relative w-full md:w-96">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+          <div ref={searchContainerRef} className="relative w-full md:w-96">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
+              onChange={(e) => {
+                setSearchQuery(e.target.value);
+                setShowSearchDropdown(true);
+              }}
+              onFocus={() => {
+                if (searchQuery.trim()) setShowSearchDropdown(true);
+              }}
               placeholder="Search subjects or topics..."
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-8 py-2 text-xs text-slate-800 placeholder-slate-400 outline-none focus:ring-2 focus:ring-indigo-500 transition-all"
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-8 py-2 text-xs text-slate-800 placeholder-slate-400 outline-none focus:ring-2 focus:ring-indigo-500 transition-all shadow-inner"
             />
             {searchQuery && (
               <button
                 type="button"
-                onClick={() => setSearchQuery('')}
-                className="text-slate-400 hover:text-slate-600 p-1 absolute right-2.5 top-1/2 -translate-y-1/2"
+                onClick={() => {
+                  setSearchQuery('');
+                  setShowSearchDropdown(false);
+                }}
+                className="text-slate-400 hover:text-slate-600 p-1 absolute right-2.5 top-1/2 -translate-y-1/2 cursor-pointer"
+                title="Clear search"
               >
                 <X className="w-3.5 h-3.5" />
               </button>
             )}
 
             {/* Quick search suggestions popup */}
-            {searchQuery.trim() && (
-              <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-xl border border-indigo-100 p-2 z-40 max-h-72 overflow-y-auto custom-scrollbar animate-in fade-in slide-in-from-top-1 duration-200">
-                <p className="text-[10px] font-black uppercase text-slate-400 px-3 py-1">
-                  Matching Curriculum Topics ({searchResults.length})
-                </p>
+            {showSearchDropdown && searchQuery.trim() && (
+              <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-2xl shadow-2xl border border-slate-200/90 p-2 z-50 max-h-80 overflow-y-auto custom-scrollbar animate-in fade-in slide-in-from-top-1 duration-200">
+                <div className="flex items-center justify-between px-3 py-1.5 border-b border-slate-100 mb-1">
+                  <p className="text-[10px] font-black uppercase text-slate-400 tracking-wider">
+                    Matching Curriculum Topics ({searchResults.length})
+                  </p>
+                  <button
+                    type="button"
+                    onClick={() => setShowSearchDropdown(false)}
+                    className="text-[10px] text-slate-400 hover:text-slate-700 font-bold cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
                 {searchResults.length === 0 ? (
-                  <p className="text-xs text-slate-400 p-3 text-center">No topics match your search.</p>
+                  <p className="text-xs text-slate-400 p-4 text-center">No topics match your search.</p>
                 ) : (
                   searchResults.map((t, idx) => (
                     <button
@@ -637,7 +903,9 @@ export default function CohortLearningGapsPanel() {
                       </div>
                       <div className="flex items-center gap-2 shrink-0">
                         <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-full ${
-                          t.accuracy < 50 ? 'bg-rose-50 text-rose-700' : t.accuracy < 70 ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'
+                          t.accuracy < 50 ? 'bg-rose-50 text-rose-700 border border-rose-200' :
+                          t.accuracy < 70 ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                          'bg-emerald-50 text-emerald-700 border border-emerald-200'
                         }`}>
                           {t.accuracy}%
                         </span>
@@ -1118,9 +1386,19 @@ export default function CohortLearningGapsPanel() {
                                                       >
                                                         <div>
                                                           <div className="flex items-center justify-between gap-2">
-                                                            <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-md text-[10px] font-black uppercase">
-                                                              {plan.status || 'PUBLISHED'}
-                                                            </span>
+                                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                              <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-md text-[10px] font-black uppercase">
+                                                                {plan.status || 'PUBLISHED'}
+                                                              </span>
+                                                              <span className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px] font-black">
+                                                                v{plan.version || 1}
+                                                              </span>
+                                                              {plan.is_stale && (
+                                                                <span className="px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded text-[9px] font-black uppercase">
+                                                                  Stale
+                                                                </span>
+                                                              )}
+                                                            </div>
                                                             <span className="text-[10px] text-slate-400 font-medium">
                                                               {plan.updated_at ? new Date(plan.updated_at).toLocaleDateString() : 'Recent'}
                                                             </span>
@@ -1191,9 +1469,19 @@ export default function CohortLearningGapsPanel() {
                         className="bg-white border border-slate-200 rounded-xl p-3.5 shadow-2xs space-y-2 flex flex-col justify-between"
                       >
                         <div>
-                          <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px] font-black uppercase">
-                            {plan.status || 'SAVED'}
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <span className="px-2 py-0.5 bg-slate-100 text-slate-700 rounded text-[10px] font-black uppercase">
+                              {plan.status || 'SAVED'}
+                            </span>
+                            <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded text-[10px] font-black">
+                              v{plan.version || 1}
+                            </span>
+                            {plan.is_stale && (
+                              <span className="px-1.5 py-0.5 bg-amber-50 text-amber-700 border border-amber-200 rounded text-[9px] font-black uppercase">
+                                Stale
+                              </span>
+                            )}
+                          </div>
                           <h5 className="text-xs font-bold text-slate-800 mt-1 truncate">
                             {plan.topic_tag || 'Legacy Topic'}
                           </h5>
@@ -1321,7 +1609,7 @@ export default function CohortLearningGapsPanel() {
                 <div className="p-8 text-center bg-rose-50 rounded-2xl border border-rose-100 space-y-3">
                   <AlertTriangle className="w-10 h-10 text-rose-500 mx-auto" />
                   <h4 className="text-sm font-bold text-rose-800">Unable to generate remedial plan</h4>
-                  <p className="text-xs text-rose-600 max-w-md mx-auto">{remedialError}</p>
+                  <p className="text-xs text-rose-600 max-w-md mx-auto">{getDisplayText(remedialError)}</p>
                   <button
                     type="button"
                     onClick={() => handleOpenRemedialPlan(targetTopicForRemedial)}
@@ -1336,56 +1624,56 @@ export default function CohortLearningGapsPanel() {
                 <div className="space-y-6">
 
                   {/* 1. PREREQUISITE KNOWLEDGE TO REVIEW FIRST */}
-                  {remedialPlan.prerequisiteRecap && (
+                  {(remedialPlan.prerequisiteRecap || remedialPlan.prerequisites) && (
                     <div className="p-5 bg-amber-50/80 border border-amber-200/90 rounded-2xl space-y-2 shadow-2xs">
                       <h4 className="text-xs font-black uppercase tracking-wider text-amber-900 flex items-center gap-2">
                         <AlertTriangle className="w-4 h-4 text-amber-600" />
                         <span>1. PREREQUISITE KNOWLEDGE TO REVIEW FIRST</span>
                       </h4>
                       <p className="text-xs text-amber-950 leading-relaxed font-medium whitespace-pre-wrap">
-                        {remedialPlan.prerequisiteRecap}
+                        {getDisplayText(remedialPlan.prerequisiteRecap || remedialPlan.prerequisites)}
                       </p>
                     </div>
                   )}
 
                   {/* 2. CORE CONCEPT & LEARNING OBJECTIVE */}
-                  {remedialPlan.conceptExplanation && (
+                  {(remedialPlan.conceptExplanation || remedialPlan.coreConcept) && (
                     <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-2 shadow-2xs">
                       <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-2">
                         <BookOpen className="w-4 h-4 text-indigo-600" />
                         <span>2. CORE CONCEPT & LEARNING OBJECTIVE</span>
                       </h4>
                       <p className="text-xs text-slate-700 leading-relaxed font-medium whitespace-pre-wrap">
-                        {remedialPlan.conceptExplanation}
+                        {getDisplayText(remedialPlan.conceptExplanation || remedialPlan.coreConcept)}
                       </p>
                     </div>
                   )}
 
                   {/* 3. WORKED STEP-BY-STEP EXAMPLE */}
-                  {remedialPlan.example && (
+                  {(remedialPlan.example || remedialPlan.workedExample) && (
                     <div className="p-5 bg-indigo-50/50 border border-indigo-100 rounded-2xl space-y-2">
                       <h4 className="text-xs font-black uppercase tracking-wider text-indigo-900 flex items-center gap-2">
                         <Lightbulb className="w-4 h-4 text-indigo-600" />
                         <span>3. WORKED EXAMPLE</span>
                       </h4>
                       <div className="p-3.5 bg-white rounded-xl border border-indigo-100 text-xs text-indigo-950 leading-relaxed font-medium whitespace-pre-wrap font-mono">
-                        {remedialPlan.example}
+                        {getDisplayText(remedialPlan.example || remedialPlan.workedExample)}
                       </div>
                     </div>
                   )}
 
                   {/* 4. COMMON MISTAKES & MISCONCEPTIONS */}
-                  {remedialPlan.commonMistakes && remedialPlan.commonMistakes.length > 0 && (
+                  {getDisplayList(remedialPlan.commonMistakes).length > 0 && (
                     <div className="p-5 bg-rose-50/40 border border-rose-100 rounded-2xl space-y-3">
                       <h4 className="text-xs font-black uppercase tracking-wider text-rose-900 flex items-center gap-2">
                         <Target className="w-4 h-4 text-rose-600" />
                         <span>4. COMMON MISTAKES</span>
                       </h4>
                       <ul className="space-y-2">
-                        {remedialPlan.commonMistakes.map((mistake, mIdx) => (
+                        {getDisplayList(remedialPlan.commonMistakes).map((mistake, mIdx) => (
                           <li key={mIdx} className="text-xs text-rose-950 font-medium flex items-start gap-2.5">
                             <span className="w-2 h-2 rounded-full bg-rose-500 mt-1.5 shrink-0" />
-                            <span>{mistake}</span>
+                            <span>{getDisplayText(mistake)}</span>
                           </li>
                         ))}
                       </ul>
@@ -1393,16 +1681,16 @@ export default function CohortLearningGapsPanel() {
                   )}
 
                   {/* 5. TARGETED PRACTICE EXERCISES */}
-                  {remedialPlan.practiceExercises && remedialPlan.practiceExercises.length > 0 && (
+                  {getDisplayList(remedialPlan.practiceExercises || remedialPlan.targetedPractice).length > 0 && (
                     <div className="p-5 bg-white border border-slate-200 rounded-2xl space-y-3 shadow-2xs">
                       <h4 className="text-xs font-black uppercase tracking-wider text-slate-900 flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-emerald-600" />
                         <span>5. TARGETED PRACTICE EXERCISES</span>
                       </h4>
                       <div className="space-y-2.5">
-                        {remedialPlan.practiceExercises.map((ex, exIdx) => (
-                          <div key={exIdx} className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-800 font-medium">
-                            <strong>Problem {exIdx + 1}:</strong> {ex}
+                        {getDisplayList(remedialPlan.practiceExercises || remedialPlan.targetedPractice).map((ex, exIdx) => (
+                          <div key={exIdx} className="p-3.5 bg-slate-50 rounded-xl border border-slate-100 text-xs text-slate-800 font-medium whitespace-pre-wrap">
+                            <strong>Problem {exIdx + 1}:</strong> {getDisplayText(ex)}
                           </div>
                         ))}
                       </div>
@@ -1410,34 +1698,34 @@ export default function CohortLearningGapsPanel() {
                   )}
 
                   {/* 6. QUICK ASSESSMENT / REASSESSMENT */}
-                  {remedialPlan.quickAssessmentQuestions && remedialPlan.quickAssessmentQuestions.length > 0 && (
+                  {getDisplayQuestions(remedialPlan.quickAssessmentQuestions || remedialPlan.diagnosticQuestions).length > 0 && (
                     <div className="p-5 bg-purple-50/40 border border-purple-100 rounded-2xl space-y-3">
                       <h4 className="text-xs font-black uppercase tracking-wider text-purple-900 flex items-center gap-2">
                         <CheckCircle2 className="w-4 h-4 text-purple-600" />
                         <span>6. QUICK ASSESSMENT / REASSESSMENT</span>
                       </h4>
                       <div className="space-y-3">
-                        {remedialPlan.quickAssessmentQuestions.map((q, qIdx) => (
+                        {getDisplayQuestions(remedialPlan.quickAssessmentQuestions || remedialPlan.diagnosticQuestions).map((q, qIdx) => (
                           <div key={qIdx} className="p-4 bg-white rounded-xl border border-purple-100 text-xs space-y-2.5 shadow-2xs">
-                            <p className="font-bold text-slate-900">Q{qIdx + 1}: {q.question}</p>
+                            <p className="font-bold text-slate-900">Q{qIdx + 1}: {getDisplayText(q.question)}</p>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                               {q.options?.map((opt, oIdx) => (
                                 <div
                                   key={oIdx}
                                   className={`p-2.5 rounded-lg border text-[11px] font-medium ${
-                                    oIdx === q.correctIndex
+                                    (oIdx === q.correctIndex || (q.answer !== undefined && opt === q.answer))
                                       ? 'bg-emerald-50 border-emerald-300 font-bold text-emerald-900'
                                       : 'bg-slate-50 border-slate-200 text-slate-700'
                                   }`}
                                 >
-                                  <span>{opt}</span>
-                                  {oIdx === q.correctIndex && <span className="ml-1 text-emerald-600">✓ (Correct)</span>}
+                                  <span>{getDisplayText(opt)}</span>
+                                  {(oIdx === q.correctIndex || (q.answer !== undefined && opt === q.answer)) && <span className="ml-1 text-emerald-600">✓ (Correct)</span>}
                                 </div>
                               ))}
                             </div>
                             {q.explanation && (
                               <p className="text-[11px] text-slate-600 italic bg-slate-50 p-2.5 rounded-lg border border-slate-100">
-                                Rationale: {q.explanation}
+                                Rationale: {getDisplayText(q.explanation)}
                               </p>
                             )}
                           </div>
@@ -1541,94 +1829,300 @@ export default function CohortLearningGapsPanel() {
 
             {/* Plan Metadata Bar */}
             <div className="px-6 py-2.5 bg-slate-50/90 border-b border-slate-100 flex items-center justify-between text-xs font-bold text-slate-600 flex-wrap gap-2 shrink-0">
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="px-2 py-0.5 bg-emerald-100 text-emerald-800 rounded-md text-[10px] font-black uppercase">
                   {viewingSavedPlan.status || 'PUBLISHED'}
                 </span>
-                <span>By: {viewingSavedPlan.author_name || 'Faculty'}</span>
+                <span className="px-2 py-0.5 bg-indigo-100 text-indigo-800 rounded-md text-[10px] font-black">
+                  v{viewingSavedPlan.version || 1}
+                </span>
+                {(planDependencies?.isStale ?? viewingSavedPlan.is_stale) ? (
+                  <span className="px-2 py-0.5 bg-amber-100 text-amber-800 border border-amber-300 rounded-md text-[10px] font-black uppercase flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3 text-amber-600" />
+                    <span>Stale Sections ({planDependencies?.staleItemKeys?.length || 'Detected'})</span>
+                  </span>
+                ) : (
+                  <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-md text-[10px] font-black uppercase flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                    <span>All Sections Up to Date</span>
+                  </span>
+                )}
+                {viewingSavedPlan.citations && viewingSavedPlan.citations.length > 0 && (
+                  <span className="px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-md text-[10px] font-bold">
+                    {viewingSavedPlan.citations.length} Citation{viewingSavedPlan.citations.length > 1 ? 's' : ''}
+                  </span>
+                )}
+                <span className="text-slate-500">By: {viewingSavedPlan.author_name || 'Faculty'}</span>
               </div>
               <span className="text-[11px] text-slate-400">
                 Saved on {new Date(viewingSavedPlan.updated_at || viewingSavedPlan.created_at).toLocaleDateString()}
               </span>
             </div>
 
+            {/* Active Notices / Recompute Alerts */}
+            {recomputeNotice && (
+              <div className="px-6 py-2.5 bg-indigo-50 border-b border-indigo-100 flex items-center gap-2 text-xs font-semibold text-indigo-900 shrink-0">
+                <Loader2 className="w-4 h-4 animate-spin text-indigo-600 shrink-0" />
+                <span className="flex-1">{recomputeNotice}</span>
+              </div>
+            )}
+
+            {recomputeError && (
+              <div className="px-6 py-3 bg-rose-50 border-b border-rose-200 flex items-start justify-between gap-3 text-xs text-rose-900 shrink-0">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div>
+                    <p className="font-bold">Recompute Notice</p>
+                    <p className="text-rose-800">{getDisplayText(recomputeError)}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    disabled={isRecomputing}
+                    onClick={() => handleIncrementalUpdate(viewingSavedPlan.id, 0)}
+                    className="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded-lg text-xs font-bold transition-colors cursor-pointer"
+                  >
+                    Retry
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setRecomputeError(null)}
+                    className="text-rose-500 hover:text-rose-700 p-1 cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {recomputeSuccessInfo && (
+              <div className="px-6 py-2.5 bg-emerald-50 border-b border-emerald-100 flex items-center justify-between text-xs text-emerald-900 shrink-0">
+                <div className="flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>
+                    {recomputeSuccessInfo.outcome === 'NO_OP' ? (
+                      recomputeSuccessInfo.message
+                    ) : (
+                      `✓ Successfully recomputed ${recomputeSuccessInfo.recomputedKeys?.join(', ')} to v${recomputeSuccessInfo.newVersion} in ${recomputeSuccessInfo.latencyMs}ms.`
+                    )}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setRecomputeSuccessInfo(null)}
+                  className="text-emerald-600 hover:text-emerald-800 p-1 cursor-pointer"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
+            {/* Collapsible Audit History Drawer */}
+            {showAuditHistory && (
+              <div className="px-6 py-4 bg-slate-900 text-slate-100 border-b border-slate-800 max-h-56 overflow-y-auto custom-scrollbar shrink-0 space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <History className="w-4 h-4 text-indigo-400" />
+                    <h4 className="text-xs font-black uppercase tracking-wider text-slate-200">
+                      Incremental Update Audit Trail ({auditLogs.length})
+                    </h4>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAuditHistory(false)}
+                    className="text-slate-400 hover:text-white text-xs cursor-pointer"
+                  >
+                    Close
+                  </button>
+                </div>
+
+                {auditLogs.length === 0 ? (
+                  <p className="text-xs text-slate-400 py-2">No incremental recomputations recorded yet for this plan.</p>
+                ) : (
+                  <div className="space-y-2">
+                    {auditLogs.map((log) => (
+                      <div key={log.id} className="p-2.5 bg-slate-800/80 rounded-xl border border-slate-700/80 text-xs space-y-1">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-black uppercase ${
+                              log.outcome === 'SUCCESS' ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' :
+                              log.outcome === 'NO_OP' ? 'bg-slate-700 text-slate-300' :
+                              'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                            }`}>
+                              {log.outcome}
+                            </span>
+                            <span className="font-mono text-slate-300 text-[11px]">{log.trigger_type}</span>
+                          </div>
+                          <span className="text-slate-400 text-[10px]">
+                            {new Date(log.created_at).toLocaleString()}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[11px] text-slate-400 flex-wrap gap-2 pt-0.5">
+                          <span>By {log.trigger_user_name || 'System / Mentor'} ({log.latency_ms || 0}ms, {log.ai_calls_made || 0} AI call)</span>
+                          {log.affected_item_keys && log.affected_item_keys.length > 0 && (
+                            <span className="text-indigo-300">
+                              Sections: {log.affected_item_keys.join(', ')}
+                            </span>
+                          )}
+                        </div>
+                        {log.error_message && (
+                          <p className="text-rose-400 text-[10px] font-mono mt-1">{getDisplayText(log.error_message)}</p>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Scrollable Content */}
             <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-5 bg-white">
               {(() => {
                 const plan = viewingSavedPlan.plan_content || {};
+
+                const getItemBadge = (itemKey) => {
+                  if (!planDependencies?.items) return null;
+                  const it = planDependencies.items.find(i => i.item_key === itemKey);
+                  if (!it) return null;
+                  const isStale = it.status === 'STALE';
+                  return (
+                    <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                      isStale
+                        ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                        : 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                    }`}>
+                      {isStale ? 'Stale' : 'Active'} • v{it.version || 1}
+                    </span>
+                  );
+                };
+
                 return (
                   <>
-                    {plan.prerequisiteRecap && (
+                    {(plan.prerequisiteRecap || plan.prerequisites) && (
                       <div className="p-4 bg-amber-50/80 border border-amber-200/90 rounded-2xl space-y-1.5">
-                        <h4 className="text-xs font-black uppercase text-amber-900">1. Prerequisite Knowledge</h4>
-                        <p className="text-xs text-amber-950 whitespace-pre-wrap leading-relaxed">{plan.prerequisiteRecap}</p>
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-black uppercase text-amber-900">1. Prerequisite Knowledge</h4>
+                          {getItemBadge('prerequisiteRecap')}
+                        </div>
+                        <p className="text-xs text-amber-950 whitespace-pre-wrap leading-relaxed">{getDisplayText(plan.prerequisiteRecap || plan.prerequisites)}</p>
                       </div>
                     )}
 
-                    {plan.conceptExplanation && (
+                    {(plan.conceptExplanation || plan.coreConcept) && (
                       <div className="p-4 bg-white border border-slate-200 rounded-2xl space-y-1.5 shadow-2xs">
-                        <h4 className="text-xs font-black uppercase text-slate-900">2. Core Concept & Objective</h4>
-                        <p className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">{plan.conceptExplanation}</p>
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-black uppercase text-slate-900">2. Core Concept & Objective</h4>
+                          {getItemBadge('conceptExplanation')}
+                        </div>
+                        <p className="text-xs text-slate-700 whitespace-pre-wrap leading-relaxed">{getDisplayText(plan.conceptExplanation || plan.coreConcept)}</p>
                       </div>
                     )}
 
-                    {plan.example && (
+                    {(plan.example || plan.workedExample) && (
                       <div className="p-4 bg-indigo-50/50 border border-indigo-100 rounded-2xl space-y-1.5">
-                        <h4 className="text-xs font-black uppercase text-indigo-900">3. Worked Step-by-Step Example</h4>
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-black uppercase text-indigo-900">3. Worked Step-by-Step Example</h4>
+                          {getItemBadge('example')}
+                        </div>
                         <div className="p-3 bg-white rounded-xl border border-indigo-100 text-xs font-mono text-indigo-950 whitespace-pre-wrap">
-                          {plan.example}
+                          {getDisplayText(plan.example || plan.workedExample)}
                         </div>
                       </div>
                     )}
 
-                    {plan.commonMistakes && plan.commonMistakes.length > 0 && (
+                    {getDisplayList(plan.commonMistakes).length > 0 && (
                       <div className="p-4 bg-rose-50/40 border border-rose-100 rounded-2xl space-y-2">
-                        <h4 className="text-xs font-black uppercase text-rose-900">4. Common Mistakes</h4>
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-black uppercase text-rose-900">4. Common Mistakes</h4>
+                          {getItemBadge('commonMistakes')}
+                        </div>
                         <ul className="space-y-1.5">
-                          {plan.commonMistakes.map((m, idx) => (
+                          {getDisplayList(plan.commonMistakes).map((m, idx) => (
                             <li key={idx} className="text-xs text-rose-950 flex items-start gap-2">
                               <span className="w-1.5 h-1.5 rounded-full bg-rose-500 mt-1.5 shrink-0" />
-                              <span>{m}</span>
+                              <span>{getDisplayText(m)}</span>
                             </li>
                           ))}
                         </ul>
                       </div>
                     )}
 
-                    {plan.practiceExercises && plan.practiceExercises.length > 0 && (
+                    {getDisplayList(plan.practiceExercises || plan.targetedPractice).length > 0 && (
                       <div className="p-4 bg-white border border-slate-200 rounded-2xl space-y-2 shadow-2xs">
-                        <h4 className="text-xs font-black uppercase text-slate-900">5. Practice Exercises</h4>
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-black uppercase text-slate-900">5. Practice Exercises</h4>
+                          {getItemBadge('practiceExercises')}
+                        </div>
                         <div className="space-y-2">
-                          {plan.practiceExercises.map((ex, idx) => (
-                            <div key={idx} className="p-3 bg-slate-50 rounded-xl text-xs text-slate-800">
-                              <strong>Problem {idx + 1}:</strong> {ex}
+                          {getDisplayList(plan.practiceExercises || plan.targetedPractice).map((ex, idx) => (
+                            <div key={idx} className="p-3 bg-slate-50 rounded-xl text-xs text-slate-800 whitespace-pre-wrap">
+                              <strong>Problem {idx + 1}:</strong> {getDisplayText(ex)}
                             </div>
                           ))}
                         </div>
                       </div>
                     )}
 
-                    {plan.quickAssessmentQuestions && plan.quickAssessmentQuestions.length > 0 && (
+                    {getDisplayQuestions(plan.quickAssessmentQuestions || plan.diagnosticQuestions).length > 0 && (
                       <div className="p-4 bg-purple-50/40 border border-purple-100 rounded-2xl space-y-2">
-                        <h4 className="text-xs font-black uppercase text-purple-900">6. Assessment Questions</h4>
+                        <div className="flex items-center justify-between">
+                          <h4 className="text-xs font-black uppercase text-purple-900">6. Assessment Questions</h4>
+                          {getItemBadge('quickAssessmentQuestions')}
+                        </div>
                         <div className="space-y-2.5">
-                          {plan.quickAssessmentQuestions.map((q, idx) => (
+                          {getDisplayQuestions(plan.quickAssessmentQuestions || plan.diagnosticQuestions).map((q, idx) => (
                             <div key={idx} className="p-3 bg-white rounded-xl border border-purple-100 text-xs space-y-2 shadow-2xs">
-                              <p className="font-bold text-slate-900">Q{idx + 1}: {q.question}</p>
+                              <p className="font-bold text-slate-900">Q{idx + 1}: {getDisplayText(q.question)}</p>
                               <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
                                 {q.options?.map((opt, oIdx) => (
                                   <div
                                     key={oIdx}
                                     className={`p-2 rounded text-[11px] font-medium border ${
-                                      oIdx === q.correctIndex
+                                      (oIdx === q.correctIndex || (q.answer !== undefined && opt === q.answer))
                                         ? 'bg-emerald-50 border-emerald-300 font-bold text-emerald-900'
                                         : 'bg-slate-50 border-slate-200 text-slate-700'
                                     }`}
                                   >
-                                    {opt}
+                                    {getDisplayText(opt)}
                                   </div>
                                 ))}
                               </div>
+                              {q.explanation && (
+                                <p className="text-[11px] text-slate-600 italic bg-slate-50 p-2 rounded-lg border border-slate-100">
+                                  Rationale: {getDisplayText(q.explanation)}
+                                </p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {viewingSavedPlan.citations && viewingSavedPlan.citations.length > 0 && (
+                      <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-2">
+                        <h4 className="text-xs font-black uppercase text-slate-700 flex items-center gap-1.5">
+                          <BookOpen className="w-3.5 h-3.5 text-slate-500" />
+                          <span>7. Academic Resource Citations</span>
+                        </h4>
+                        <div className="space-y-1.5">
+                          {viewingSavedPlan.citations.map((c, idx) => (
+                            <div key={idx} className="p-2.5 bg-white rounded-xl border border-slate-200/80 text-xs flex items-center justify-between gap-2">
+                              <div>
+                                <p className="font-bold text-slate-800">{c.title || c.fileName || 'Course Material'}</p>
+                                <p className="text-[10px] text-slate-400">Version: {c.versionTimestamp ? new Date(c.versionTimestamp).toLocaleString() : 'N/A'}</p>
+                              </div>
+                              {c.fileUrl && (
+                                <a
+                                  href={c.fileUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-[11px] font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                                >
+                                  <span>View</span>
+                                  <ArrowUpRight className="w-3 h-3" />
+                                </a>
+                              )}
                             </div>
                           ))}
                         </div>
@@ -1640,14 +2134,46 @@ export default function CohortLearningGapsPanel() {
             </div>
 
             {/* Fixed Footer */}
-            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/80 flex items-center justify-end shrink-0">
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/80 flex items-center justify-between shrink-0">
               <button
                 type="button"
-                onClick={() => setViewingSavedPlan(null)}
-                className="px-5 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                onClick={() => setShowAuditHistory(prev => !prev)}
+                className="px-3.5 py-2 bg-slate-200/80 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-colors flex items-center gap-1.5 cursor-pointer"
               >
-                Close
+                <History className="w-3.5 h-3.5 text-slate-600" />
+                <span>{showAuditHistory ? 'Hide Audit Trail' : `Audit History (${auditLogs.length})`}</span>
               </button>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setViewingSavedPlan(null)}
+                  className="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Close
+                </button>
+
+                {isAuthorizedMentor && (
+                  <button
+                    type="button"
+                    disabled={isRecomputing}
+                    onClick={() => handleIncrementalUpdate(viewingSavedPlan.id, 0)}
+                    className="px-5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-xl text-xs font-bold transition-all shadow-xs flex items-center gap-2 cursor-pointer"
+                  >
+                    {isRecomputing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Recomputing...</span>
+                      </>
+                    ) : (
+                      <>
+                        <RotateCcw className="w-4 h-4" />
+                        <span>Recompute Stale Items</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
           </div>
         </div>,

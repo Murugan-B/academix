@@ -34,8 +34,8 @@ export default function PublicSearch() {
   const [availableModels, setAvailableModels] = useState([
     { id: 'auto', name: 'Auto (Smart Multi-Provider)', badge: 'Recommended' },
     { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', badge: 'Fast & Smart' },
-    { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash', badge: 'High Throughput' },
-    { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash', badge: 'Multimodal' },
+    { id: 'gemini-3.5-flash', name: 'Gemini 3.5 Flash', badge: 'High Throughput' },
+    { id: 'gemini-3.5-flash-lite', name: 'Gemini 3.5 Flash Lite', badge: 'Lightweight' },
     { id: 'openrouter-default', name: 'OpenRouter AI', badge: 'Fallback' }
   ]);
   const [includeWebSearch, setIncludeWebSearch] = useState(true);

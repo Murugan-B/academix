@@ -105,7 +105,7 @@ export default function MyHub() {
               className="px-3.5 py-1.5 bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 text-white text-xs font-bold rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
             >
               <Plus className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">+ Add Public Material</span>
+              <span className="hidden sm:inline">Add Public Material</span>
             </button>
 
             <Link

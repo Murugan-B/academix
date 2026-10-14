@@ -1,6 +1,7 @@
 const db = require('../db');
 const aiService = require('../services/ai/aiService');
 const textExtractor = require('../utils/textExtractor');
+const incrementalRemedialService = require('../services/remedial/incrementalRemedialService');
 
 /**
  * Depth-limited graph cycle detector for PREREQUISITE_OF / DEPENDS_ON
@@ -340,6 +341,11 @@ exports.createRelationship = async (req, res) => {
       [sourceConceptId, targetConceptId, relationshipType, status, userId]
     );
 
+    // Notify remedial update engine of prerequisite change
+    incrementalRemedialService.notifyPrerequisiteChange({
+      conceptId: sourceConceptId
+    }).catch(err => console.warn('[createRelationship] notifyPrerequisiteChange note:', err.message));
+
     res.status(201).json(insertRes.rows[0]);
   } catch (err) {
     console.error('createRelationship error:', err);
@@ -358,6 +364,12 @@ exports.deleteRelationship = async (req, res) => {
     if (delRes.rowCount === 0) {
       return res.status(404).json({ error: 'Relationship not found.' });
     }
+
+    // Notify remedial update engine of deleted prerequisite
+    incrementalRemedialService.notifyPrerequisiteChange({
+      conceptId: delRes.rows[0].source_concept_id
+    }).catch(err => console.warn('[deleteRelationship] notifyPrerequisiteChange note:', err.message));
+
     res.json({ success: true, message: 'Relationship deleted successfully.' });
   } catch (err) {
     console.error('deleteRelationship error:', err);
@@ -384,6 +396,12 @@ exports.updateRelationshipStatus = async (req, res) => {
     if (updateRes.rowCount === 0) {
       return res.status(404).json({ error: 'Relationship not found.' });
     }
+
+    // Notify remedial update engine of status change
+    incrementalRemedialService.notifyPrerequisiteChange({
+      conceptId: updateRes.rows[0].source_concept_id
+    }).catch(err => console.warn('[updateRelationshipStatus] notifyPrerequisiteChange note:', err.message));
+
     res.json(updateRes.rows[0]);
   } catch (err) {
     console.error('updateRelationshipStatus error:', err);

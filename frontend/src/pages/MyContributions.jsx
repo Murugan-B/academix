@@ -147,7 +147,7 @@ export default function MyContributions() {
             onClick={() => setIsAddModalOpen(true)}
             className="px-4 py-2 bg-indigo-600 text-white text-xs font-bold rounded-xl"
           >
-            + Add First Material
+            Add First Material
           </button>
         </div>
       ) : (

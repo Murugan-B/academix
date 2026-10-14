@@ -17,5 +17,8 @@ router.post('/cohort/remedial-plan', authMiddleware, mentorOnly, cohortAnalytics
 router.post('/cohort/save-remedial-plan', authMiddleware, mentorOnly, cohortAnalyticsController.saveRemedialPlan);
 router.get('/cohort/remedial-plans', authMiddleware, mentorOnly, cohortAnalyticsController.getAllDepartmentRemedialPlans);
 router.get('/cohort/subject/:subjectId/remedial-plans', authMiddleware, mentorOnly, cohortAnalyticsController.getSubjectRemedialPlans);
+router.get('/cohort/remedial-plans/:planId/dependencies', authMiddleware, mentorOnly, cohortAnalyticsController.getPlanDependencies);
+router.get('/cohort/remedial-plans/:planId/audit-history', authMiddleware, mentorOnly, cohortAnalyticsController.getPlanAuditHistory);
+router.post('/cohort/remedial-plans/:planId/incremental-update', authMiddleware, mentorOnly, cohortAnalyticsController.triggerIncrementalUpdate);
 
 module.exports = router;
