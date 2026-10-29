@@ -7,6 +7,7 @@ import {
   Sparkles, Layers, ShieldCheck, Clock, AlertCircle
 } from 'lucide-react';
 import AddPublicMaterialModal from '../components/AddPublicMaterialModal';
+import ResourcePreviewModal from '../components/ResourcePreviewModal';
 
 export default function PublicLibrary() {
   const [courses, setCourses] = useState([]);
@@ -85,6 +86,25 @@ export default function PublicLibrary() {
       }
     } catch (err) {
       console.error('Bookmark toggle error:', err);
+    }
+  };
+
+  const handleDownloadResource = async (res) => {
+    try {
+      const r = await api.get(`/student-resources/${res.id}/signed-url?download=true`);
+      if (r.data?.url) {
+        const a = document.createElement('a');
+        a.href = r.data.url;
+        a.download = r.data.file_name || res.file_name || res.title || 'download';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } else {
+        window.open(`/api/student-resources/${res.id}/download`, '_blank');
+      }
+    } catch (err) {
+      console.warn('Download fallback:', err);
+      window.open(`/api/student-resources/${res.id}/download`, '_blank');
     }
   };
 
@@ -379,35 +399,74 @@ export default function PublicLibrary() {
                         {res.contributor_name ? `By ${res.contributor_name}` : 'Open Scholar'}
                       </span>
 
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5">
                         {res.external_provider === 'YOUTUBE' ? (
-                          <button
-                            type="button"
-                            onClick={() => setActivePreviewResource(res)}
-                            className="px-3 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-xl transition-all flex items-center gap-1 cursor-pointer"
-                          >
-                            <Play className="w-3.5 h-3.5" />
-                            <span>Play Video</span>
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setActivePreviewResource(res)}
+                              className="px-2.5 py-1 bg-rose-50 hover:bg-rose-100 text-rose-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                              title="Play Video"
+                            >
+                              <Play className="w-3.5 h-3.5" />
+                              <span>Play</span>
+                            </button>
+                            {res.external_url && (
+                              <a
+                                href={res.external_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1"
+                                title="Open on YouTube"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                            )}
+                          </>
                         ) : res.external_provider === 'GOOGLE_DRIVE' ? (
-                          <button
-                            type="button"
-                            onClick={() => setActivePreviewResource(res)}
-                            className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl transition-all flex items-center gap-1 cursor-pointer"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            <span>Open Drive</span>
-                          </button>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setActivePreviewResource(res)}
+                              className="px-2.5 py-1 bg-amber-50 hover:bg-amber-100 text-amber-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                              title="Open in Drive"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Open</span>
+                            </button>
+                            {res.external_url && (
+                              <a
+                                href={res.external_url}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1"
+                                title="Open Drive Document"
+                              >
+                                <ExternalLink className="w-3.5 h-3.5" />
+                              </a>
+                            )}
+                          </>
                         ) : (
-                          <a
-                            href={res.file_url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl transition-all flex items-center gap-1"
-                          >
-                            <Download className="w-3.5 h-3.5" />
-                            <span>Download</span>
-                          </a>
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setActivePreviewResource(res)}
+                              className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                              title="Open & Preview Document"
+                            >
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Open</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadResource(res)}
+                              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                              title="Download Document"
+                            >
+                              <Download className="w-3.5 h-3.5" />
+                              <span>Download</span>
+                            </button>
+                          </>
                         )}
                       </div>
                     </div>
@@ -420,76 +479,12 @@ export default function PublicLibrary() {
         </div>
       )}
 
-      {/* ── RESOURCE PREVIEW / EMBED MODAL (YouTube & Google Drive) ──────────── */}
+      {/* ── RESOURCE PREVIEW MODAL ───────────────────────────────────────────── */}
       {activePreviewResource && (
-        <div className="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-xs flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl shadow-2xl border border-slate-200 max-w-3xl w-full max-h-[92vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95">
-            <div className="p-4 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-              <div className="flex items-center gap-2 truncate pr-4">
-                <span className="text-xs font-bold text-slate-800 truncate">{activePreviewResource.title}</span>
-              </div>
-              <button
-                type="button"
-                onClick={() => setActivePreviewResource(null)}
-                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-xl"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            <div className="p-5 overflow-y-auto space-y-4">
-              {/* YouTube Responsive Player */}
-              {activePreviewResource.external_provider === 'YOUTUBE' && activePreviewResource.external_metadata?.embedUrl && (
-                <div className="aspect-video w-full rounded-2xl overflow-hidden bg-black shadow-lg">
-                  <iframe
-                    src={activePreviewResource.external_metadata.embedUrl}
-                    title={activePreviewResource.title}
-                    allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                    allowFullScreen
-                    className="w-full h-full border-0"
-                  />
-                </div>
-              )}
-
-              {/* Google Drive Preview Player */}
-              {activePreviewResource.external_provider === 'GOOGLE_DRIVE' && (
-                <div className="space-y-3">
-                  {activePreviewResource.external_metadata?.previewUrl ? (
-                    <div className="h-[420px] w-full rounded-2xl overflow-hidden border border-slate-200 bg-slate-100">
-                      <iframe
-                        src={activePreviewResource.external_metadata.previewUrl}
-                        title={activePreviewResource.title}
-                        className="w-full h-full border-0"
-                      />
-                    </div>
-                  ) : null}
-
-                  <div className="p-4 bg-amber-50 rounded-2xl border border-amber-200 text-xs text-amber-900 space-y-1">
-                    <span className="font-bold block">Google Drive Sharing Notice</span>
-                    <p className="leading-relaxed">
-                      If the embedded preview displays a permission prompt, please click the button below to view directly in Google Drive.
-                    </p>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex items-center justify-between pt-2">
-                <p className="text-xs text-slate-500">{activePreviewResource.description}</p>
-                {activePreviewResource.external_url && (
-                  <a
-                    href={activePreviewResource.external_url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold rounded-xl flex items-center gap-1.5 shrink-0"
-                  >
-                    <span>Open in New Tab</span>
-                    <ExternalLink className="w-3.5 h-3.5" />
-                  </a>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
+        <ResourcePreviewModal
+          resource={activePreviewResource}
+          onClose={() => setActivePreviewResource(null)}
+        />
       )}
 
       {/* ── ADD PUBLIC MATERIAL MODAL ────────────────────────────────────────── */}

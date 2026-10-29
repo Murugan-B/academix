@@ -3,15 +3,17 @@ import api from '../api/axios';
 import {
   CheckSquare, Plus, Clock, CheckCircle2, XCircle, Trash2,
   ExternalLink, Download, AlertCircle, FileText, Video, Globe,
-  Folder, ShieldCheck
+  Folder, ShieldCheck, Eye
 } from 'lucide-react';
 import AddPublicMaterialModal from '../components/AddPublicMaterialModal';
+import ResourcePreviewModal from '../components/ResourcePreviewModal';
 
 export default function MyContributions() {
   const [contributions, setContributions] = useState([]);
   const [activeStatusTab, setActiveStatusTab] = useState('ALL'); // 'ALL' | 'PENDING' | 'APPROVED' | 'REJECTED'
   const [loading, setLoading] = useState(true);
   const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [previewResource, setPreviewResource] = useState(null);
 
   useEffect(() => {
     fetchContributions();
@@ -36,6 +38,25 @@ export default function MyContributions() {
       setContributions(prev => prev.filter(c => c.id !== id));
     } catch (err) {
       console.error('Failed to delete contribution:', err);
+    }
+  };
+
+  const handleDownloadResource = async (res) => {
+    try {
+      const r = await api.get(`/student-resources/${res.id}/signed-url?download=true`);
+      if (r.data?.url) {
+        const a = document.createElement('a');
+        a.href = r.data.url;
+        a.download = r.data.file_name || res.file_name || res.title || 'download';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } else {
+        window.open(`/api/student-resources/${res.id}/download`, '_blank');
+      }
+    } catch (err) {
+      console.warn('Download fallback:', err);
+      window.open(`/api/student-resources/${res.id}/download`, '_blank');
     }
   };
 
@@ -180,18 +201,26 @@ export default function MyContributions() {
                   <p className="text-xs text-slate-600 leading-relaxed">{item.description || 'No description provided.'}</p>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
-                  {item.file_url && (
-                    <a
-                      href={item.file_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all flex items-center gap-1"
-                    >
-                      <Download className="w-3.5 h-3.5" />
-                      <span>View / Download</span>
-                    </a>
-                  )}
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => setPreviewResource(item)}
+                    className="px-2.5 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-xl transition-all flex items-center gap-1 cursor-pointer"
+                    title="Open / Preview Material"
+                  >
+                    <Eye className="w-3.5 h-3.5" />
+                    <span>Open</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => handleDownloadResource(item)}
+                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-xl transition-all flex items-center gap-1 cursor-pointer"
+                    title="Download Material"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Download</span>
+                  </button>
 
                   {item.status !== 'APPROVED' && (
                     <button
@@ -224,6 +253,14 @@ export default function MyContributions() {
             </div>
           ))}
         </div>
+      )}
+
+      {/* ── RESOURCE PREVIEW MODAL ────────────────────────────────────────── */}
+      {previewResource && (
+        <ResourcePreviewModal
+          resource={previewResource}
+          onClose={() => setPreviewResource(null)}
+        />
       )}
 
       {/* ── ADD PUBLIC MATERIAL MODAL ────────────────────────────────────────── */}

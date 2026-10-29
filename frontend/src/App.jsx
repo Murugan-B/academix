@@ -27,6 +27,7 @@ import AILearning from './pages/AILearning';
 import CohortLearningGaps from './pages/CohortLearningGaps';
 import StudentResources from './pages/StudentResources';
 import ResourceApprovals from './pages/ResourceApprovals';
+import PublicActions from './pages/PublicActions';
 import Layout from './components/layout/Layout';
 import ToastContainer from './components/Toast';
 
@@ -62,6 +63,9 @@ function App() {
           <Route path="ai-assistant" element={<AIAssistant />} />
           <Route path="ai-learning" element={<AILearning />} />
           <Route path="cohort-learning-gaps" element={<CohortLearningGaps />} />
+
+          {/* Public Actions Hub */}
+          <Route path="public-actions" element={<PublicActions />} />
 
           {/* Public User Ecosystem Routes */}
           <Route path="public-library" element={<PublicLibrary />} />

@@ -691,9 +691,9 @@ exports.rejectResource = async (req, res) => {
 // 8. SIGNED URL FOR PREVIEW & DOWNLOAD
 exports.getSignedUrl = async (req, res) => {
   const { id } = req.params;
-  const userId = req.user.id;
-  const userRole = req.user.role;
-  const userDept = req.user.department_id;
+  const userId = req.user?.id;
+  const userRole = req.user?.role;
+  const userDept = req.user?.department_id;
 
   try {
     const result = await db.query('SELECT * FROM student_resources WHERE id = $1', [id]);
@@ -705,6 +705,9 @@ exports.getSignedUrl = async (req, res) => {
 
     // Check visibility permissions
     if (resource.status !== 'APPROVED') {
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required to preview pending resources.' });
+      }
       // Only uploader or authorized approver can preview pending/rejected resources
       if (resource.uploaded_by !== userId) {
         const authCheck = await checkApproverAuthorization(userId, userRole, userDept, resource);
@@ -715,6 +718,9 @@ exports.getSignedUrl = async (req, res) => {
     } else {
       // If approved, verify public flag or institutional membership
       if (!resource.is_public) {
+        if (!userId) {
+          return res.status(401).json({ error: 'Authentication required to access institutional materials.' });
+        }
         if (userRole === 'PUBLIC_USER') {
           return res.status(403).json({ error: 'Access denied: This resource is restricted to registered institute members.' });
         }
@@ -735,11 +741,15 @@ exports.getSignedUrl = async (req, res) => {
       });
     }
 
-    if (url && (url.includes('/authenticated/') || resource.cloudinary_public_id)) {
+    if (!url && !resource.cloudinary_public_id) {
+      return res.status(404).json({ error: 'Stored document file is missing or unavailable.' });
+    }
+
+    if (resource.cloudinary_public_id || (url && url.includes('/authenticated/'))) {
       const options = {
         resource_type: 'raw',
         type: 'authenticated',
-        expires_at: Math.floor(Date.now() / 1000) + 3600 // 1 hour expiry
+        expires_at: Math.floor(Date.now() / 1000) + 7200 // 2 hours expiry
       };
       if (req.query.download === 'true') {
         options.attachment = true;
@@ -752,7 +762,13 @@ exports.getSignedUrl = async (req, res) => {
       }
     }
 
-    res.json({ url, file_name: resource.file_name, file_type: resource.file_type });
+    res.json({
+      url,
+      file_name: resource.file_name || resource.title,
+      file_type: resource.file_type || 'application/octet-stream',
+      is_external: false,
+      external_provider: resource.external_provider
+    });
   } catch (err) {
     console.error('[STUDENT_RESOURCES] getSignedUrl error:', err.message);
     res.status(500).json({ error: err.message });
@@ -762,9 +778,9 @@ exports.getSignedUrl = async (req, res) => {
 // 9. STREAM PROXY FOR INLINE VIEW & DOWNLOAD
 async function handleResourceStream(req, res, disposition) {
   const { id } = req.params;
-  const userId = req.user.id;
-  const userRole = req.user.role;
-  const userDept = req.user.department_id;
+  const userId = req.user?.id;
+  const userRole = req.user?.role;
+  const userDept = req.user?.department_id;
 
   try {
     const result = await db.query('SELECT * FROM student_resources WHERE id = $1', [id]);
@@ -773,6 +789,9 @@ async function handleResourceStream(req, res, disposition) {
 
     // Authorization check
     if (resource.status !== 'APPROVED') {
+      if (!userId) {
+        return res.status(401).json({ error: 'Authentication required to access pending resources.' });
+      }
       if (resource.uploaded_by !== userId) {
         const authCheck = await checkApproverAuthorization(userId, userRole, userDept, resource);
         if (!authCheck.authorized) {
@@ -781,6 +800,9 @@ async function handleResourceStream(req, res, disposition) {
       }
     } else {
       if (!resource.is_public) {
+        if (!userId) {
+          return res.status(401).json({ error: 'Authentication required to access institutional resources.' });
+        }
         if (userRole === 'PUBLIC_USER') {
           return res.status(403).json({ error: 'Access denied: This resource is restricted to registered institute members.' });
         }
@@ -790,16 +812,26 @@ async function handleResourceStream(req, res, disposition) {
       }
     }
 
+    // External URL handling: redirect directly to external resource
+    if (resource.external_url && !resource.cloudinary_public_id) {
+      return res.redirect(resource.external_url);
+    }
+
+    if (!resource.file_url && !resource.cloudinary_public_id) {
+      return res.status(404).json({ error: 'Stored document file is missing or unavailable.' });
+    }
+
     const cloudinaryType = getCloudinaryType(resource.file_url);
     let fetchUrl;
-    if (cloudinaryType === 'authenticated') {
-      if (!resource.cloudinary_public_id) {
-        return res.status(502).json({ error: 'Resource has no stored Cloudinary reference.' });
-      }
-      fetchUrl = cloudinary.utils.private_download_url(resource.cloudinary_public_id, '', {
+    if (cloudinaryType === 'authenticated' || resource.cloudinary_public_id) {
+      const options = {
         resource_type: 'raw',
         type: 'authenticated',
-      });
+      };
+      if (disposition === 'attachment') {
+        options.attachment = true;
+      }
+      fetchUrl = cloudinary.utils.private_download_url(resource.cloudinary_public_id, '', options);
     } else {
       fetchUrl = resource.file_url;
     }
@@ -811,8 +843,9 @@ async function handleResourceStream(req, res, disposition) {
     });
 
     res.setHeader('Content-Type', resource.file_type || 'application/octet-stream');
-    const filename = encodeURIComponent(resource.file_name);
-    res.setHeader('Content-Disposition', `${disposition}; filename="${filename}"`);
+    const safeFileName = (resource.file_name || resource.title || 'document').replace(/[^\w.-]/g, '_');
+    const encodedFileName = encodeURIComponent(resource.file_name || safeFileName);
+    res.setHeader('Content-Disposition', `${disposition}; filename="${safeFileName}"; filename*=UTF-8''${encodedFileName}`);
     if (axiosRes.headers['content-length']) {
       res.setHeader('Content-Length', axiosRes.headers['content-length']);
     }

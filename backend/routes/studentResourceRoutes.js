@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const upload = require('../middlewares/uploadMiddleware');
 const authMiddleware = require('../middlewares/authMiddleware');
+const optionalAuthMiddleware = require('../middlewares/optionalAuthMiddleware');
 const roleMiddleware = require('../middlewares/roleMiddleware');
 const {
   checkDuplicate,
@@ -43,9 +44,9 @@ router.put('/:id/reject', anyAuthenticated, facultyOrAbove, rejectResource);
 router.put('/:id/toggle-public', anyAuthenticated, facultyOrAbove, togglePublicStatus);
 
 // Preview & Download
-router.get('/:id/signed-url', anyAuthenticated, getSignedUrl);
-router.get('/:id/view', anyAuthenticated, viewResource);
-router.get('/:id/download', anyAuthenticated, downloadResource);
+router.get('/:id/signed-url', optionalAuthMiddleware, getSignedUrl);
+router.get('/:id/view', optionalAuthMiddleware, viewResource);
+router.get('/:id/download', optionalAuthMiddleware, downloadResource);
 
 // Delete resource
 router.delete('/:id', anyAuthenticated, deleteResource);

@@ -43,8 +43,11 @@ exports.normalSearch = async (req, res) => {
         sr.tags,
         sr.file_name,
         sr.file_url,
+        sr.cloudinary_public_id,
         sr.file_type,
         sr.file_size,
+        sr.external_url,
+        sr.external_provider,
         sr.created_at,
         d.name as department_name,
         s.name as subject_name,
@@ -72,8 +75,11 @@ exports.normalSearch = async (req, res) => {
       tags: r.tags || [],
       fileName: r.file_name,
       fileUrl: r.file_url,
+      cloudinaryPublicId: r.cloudinary_public_id,
       fileType: r.file_type,
       fileSize: r.file_size,
+      externalUrl: r.external_url,
+      externalProvider: r.external_provider,
       department: r.department_name,
       subject: r.subject_name,
       createdAt: r.created_at,
@@ -126,15 +132,20 @@ exports.getFeaturedResources = async (req, res) => {
         sr.tags,
         sr.file_name,
         sr.file_url,
+        sr.cloudinary_public_id,
         sr.file_type,
         sr.file_size,
+        sr.external_url,
+        sr.external_provider,
         sr.created_at,
         d.name as department_name,
         s.name as subject_name,
+        pc.name as public_course_name,
         u.name as contributor_name
       FROM student_resources sr
       LEFT JOIN departments d ON sr.department_id = d.id
       LEFT JOIN subjects s ON sr.subject_id = s.id
+      LEFT JOIN public_courses pc ON sr.public_course_id = pc.id
       LEFT JOIN users u ON sr.uploaded_by = u.id
       WHERE sr.status = 'APPROVED' AND sr.is_public = TRUE
       ORDER BY sr.created_at DESC

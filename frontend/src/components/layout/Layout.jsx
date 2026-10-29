@@ -2,7 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { Outlet, useNavigate, Link, useLocation, Navigate } from 'react-router-dom';
 import {
   LogOut, BookOpen, Users, Settings, LayoutDashboard, BookText, Bot, Sparkles,
-  PanelLeftClose, PanelLeftOpen, Menu, X, FolderHeart, CheckSquare, Search, AlertTriangle
+  PanelLeftClose, PanelLeftOpen, Menu, X, FolderHeart, CheckSquare, Search, AlertTriangle,
+  Globe
 } from 'lucide-react';
 
 export default function Layout() {
@@ -76,12 +77,21 @@ export default function Layout() {
       active: currentPath === getDashboardRoute()
     },
     {
+      to: '/public-actions',
+      label: 'Public Actions',
+      description: 'Global AI search, public notes, practice tests, notes & bookmarks',
+      category: 'PAGES',
+      icon: Globe,
+      show: role !== 'PUBLIC_USER',
+      active: ['/public-actions', '/public-search', '/public-library', '/ai-test-generator', '/my-notes', '/saved-materials', '/my-contributions'].includes(currentPath)
+    },
+    {
       to: '/public-search',
       label: 'Global Search & AI',
       description: 'Search approved open notes, web & multimodal AI',
       category: 'SEARCH',
       icon: Search,
-      show: true,
+      show: role === 'PUBLIC_USER',
       active: currentPath === '/public-search'
     },
     {
@@ -90,7 +100,7 @@ export default function Layout() {
       description: 'Structured community course folders, videos & notes',
       category: 'ACADEMIC',
       icon: BookOpen,
-      show: true,
+      show: role === 'PUBLIC_USER',
       active: currentPath === '/public-library'
     },
     {
@@ -99,7 +109,7 @@ export default function Layout() {
       description: 'Generate adaptive practice tests with automatic grading',
       category: 'ACADEMIC',
       icon: Sparkles,
-      show: true,
+      show: role === 'PUBLIC_USER',
       active: currentPath === '/ai-test-generator'
     },
     {
@@ -108,7 +118,7 @@ export default function Layout() {
       description: 'Personal study notes, revision guides & AI notes',
       category: 'ACADEMIC',
       icon: BookText,
-      show: true,
+      show: role === 'PUBLIC_USER',
       active: currentPath === '/my-notes'
     },
     {
@@ -117,7 +127,7 @@ export default function Layout() {
       description: 'Bookmarked peer resources and video lectures',
       category: 'ACADEMIC',
       icon: FolderHeart,
-      show: true,
+      show: role === 'PUBLIC_USER',
       active: currentPath === '/saved-materials'
     },
     {
@@ -126,7 +136,7 @@ export default function Layout() {
       description: 'Track review status of your public submissions',
       category: 'ACADEMIC',
       icon: CheckSquare,
-      show: true,
+      show: role === 'PUBLIC_USER',
       active: currentPath === '/my-contributions'
     },
     {

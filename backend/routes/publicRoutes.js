@@ -3,6 +3,7 @@ const router = express.Router();
 const multer = require('multer');
 const publicController = require('../controllers/publicController');
 const publicEcosystemController = require('../controllers/publicEcosystemController');
+const studentResourceController = require('../controllers/studentResourceController');
 const authMiddleware = require('../middlewares/authMiddleware');
 const optionalAuthMiddleware = require('../middlewares/optionalAuthMiddleware');
 
@@ -75,5 +76,12 @@ router.get('/tests/:id/attempts', authMiddleware, publicEcosystemController.getT
 // 11. MY HUB PERSONAL WORKSPACE AGGREGATOR
 // ─────────────────────────────────────────────────────────────────────────────
 router.get('/hub-overview', authMiddleware, publicEcosystemController.getMyHubOverview);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 12. PUBLIC RESOURCE PREVIEW & DOWNLOAD
+// ─────────────────────────────────────────────────────────────────────────────
+router.get('/resources/:id/signed-url', optionalAuthMiddleware, studentResourceController.getSignedUrl);
+router.get('/resources/:id/view', optionalAuthMiddleware, studentResourceController.viewResource);
+router.get('/resources/:id/download', optionalAuthMiddleware, studentResourceController.downloadResource);
 
 module.exports = router;

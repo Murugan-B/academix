@@ -1,4 +1,6 @@
 const db = require('../db');
+const cloudinary = require('../utils/cloudinary');
+const crypto = require('crypto');
 const { validateExternalResourceUrl } = require('../utils/urlValidators');
 const usageLedgerService = require('../services/ai/usageLedgerService');
 const conversationalService = require('../services/ai/conversationalService');
@@ -138,6 +140,7 @@ exports.getPublicCourseDetails = async (req, res) => {
         sr.tags,
         sr.file_name,
         sr.file_url,
+        sr.cloudinary_public_id,
         sr.file_type,
         sr.file_size,
         sr.external_url,
@@ -223,16 +226,53 @@ exports.contributeMaterial = async (req, res) => {
     let fileUrl = null;
     let fileType = null;
     let fileSize = null;
+    let fileHash = null;
+    let cloudinaryPublicId = null;
     let finalExternalUrl = null;
     let externalProvider = 'LOCAL_UPLOAD';
     let externalMetadata = null;
 
     if (req.file) {
-      fileName = req.file.originalname;
-      fileUrl = req.file.path || req.file.secure_url || req.file.url;
-      fileType = req.file.mimetype;
-      fileSize = req.file.size;
-      externalProvider = 'LOCAL_UPLOAD';
+      if (req.file.size > 15 * 1024 * 1024) {
+        return res.status(400).json({ message: 'File size must be less than 15 MB.' });
+      }
+
+      const allowedExtensions = ['pdf', 'doc', 'docx', 'ppt', 'pptx', 'txt'];
+      const fileExt = req.file.originalname.split('.').pop().toLowerCase();
+      if (!allowedExtensions.includes(fileExt)) {
+        return res.status(400).json({ message: 'Unsupported file type. Please upload a PDF, DOCX, PPTX, or TXT file.' });
+      }
+
+      fileHash = crypto.createHash('md5').update(req.file.buffer).digest('hex');
+      const uniqueFilename = `public_contrib_${Date.now()}_${req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_')}`;
+
+      try {
+        const cloudResult = await new Promise((resolve, reject) => {
+          const uploadStream = cloudinary.uploader.upload_stream(
+            {
+              resource_type: 'raw',
+              type: 'authenticated',
+              folder: 'student_resources',
+              public_id: uniqueFilename
+            },
+            (err, result) => {
+              if (err) return reject(err);
+              resolve(result);
+            }
+          );
+          uploadStream.end(req.file.buffer);
+        });
+
+        fileName = req.file.originalname;
+        fileUrl = cloudResult.secure_url;
+        fileType = req.file.mimetype;
+        fileSize = req.file.size;
+        cloudinaryPublicId = cloudResult.public_id;
+        externalProvider = 'LOCAL_UPLOAD';
+      } catch (uploadErr) {
+        console.error('Cloudinary upload error in contributeMaterial:', uploadErr);
+        return res.status(500).json({ message: 'Failed to upload document to storage service.' });
+      }
     } else if (externalUrl) {
       const validated = validateExternalResourceUrl(externalUrl);
       if (!validated.isValid) {
@@ -265,8 +305,10 @@ exports.contributeMaterial = async (req, res) => {
         topic_id,
         file_name,
         file_url,
+        cloudinary_public_id,
         file_type,
         file_size,
+        file_hash,
         external_url,
         external_provider,
         external_metadata,
@@ -275,8 +317,8 @@ exports.contributeMaterial = async (req, res) => {
         is_public,
         uploaded_by
       )
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, 'STUDENT', 'PENDING', TRUE, $19)
-      RETURNING id, title, status, is_public, external_provider, created_at
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, 'STUDENT', 'PENDING', TRUE, $21)
+      RETURNING id, title, status, is_public, external_provider, file_name, file_url, cloudinary_public_id, created_at
     `, [
       title.trim(),
       description?.trim() || null,
@@ -291,8 +333,10 @@ exports.contributeMaterial = async (req, res) => {
       topicId || null,
       fileName,
       fileUrl,
+      cloudinaryPublicId,
       fileType,
       fileSize,
+      fileHash,
       finalExternalUrl,
       externalProvider,
       externalMetadata ? JSON.stringify(externalMetadata) : null,
@@ -327,7 +371,9 @@ exports.getMyContributions = async (req, res) => {
         sr.rejection_reason,
         sr.file_name,
         sr.file_url,
+        sr.cloudinary_public_id,
         sr.file_type,
+        sr.file_size,
         sr.external_url,
         sr.external_provider,
         sr.external_metadata,

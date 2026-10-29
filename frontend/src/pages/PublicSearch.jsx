@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
 import api from '../api/axios';
+import ResourcePreviewModal from '../components/ResourcePreviewModal';
 import {
   Search, Bot, Sparkles, BookOpen, FileText, ExternalLink,
   ShieldCheck, Globe, CheckCircle2, ArrowRight, BookMarked,
@@ -27,6 +28,7 @@ export default function PublicSearch() {
   const [featuredResources, setFeaturedResources] = useState([]);
   const [searchProvider, setSearchProvider] = useState('');
   const [selectedImageModal, setSelectedImageModal] = useState(null);
+  const [previewResource, setPreviewResource] = useState(null);
 
   // Conversational AI State
   const [aiProvider, setAiProvider] = useState('auto');
@@ -449,6 +451,38 @@ export default function PublicSearch() {
     setTimeout(() => setCopiedIdx(null), 2000);
   };
 
+  const handleOpenResource = (res) => {
+    const ext = res.externalUrl || res.external_url;
+    if (ext && !res.cloudinaryPublicId && !res.cloudinary_public_id) {
+      if (ext.includes('youtube.com') || ext.includes('youtu.be') || ext.includes('drive.google.com')) {
+        setPreviewResource(res);
+        return;
+      }
+      window.open(ext, '_blank', 'noopener,noreferrer');
+      return;
+    }
+    setPreviewResource(res);
+  };
+
+  const handleDownloadResource = async (res) => {
+    try {
+      const r = await api.get(`/student-resources/${res.id}/signed-url?download=true`);
+      if (r.data?.url) {
+        const a = document.createElement('a');
+        a.href = r.data.url;
+        a.download = r.data.file_name || res.fileName || res.file_name || res.title || 'download';
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      } else {
+        window.open(`/api/student-resources/${res.id}/download`, '_blank');
+      }
+    } catch (err) {
+      console.warn('Fallback stream download:', err);
+      window.open(`/api/student-resources/${res.id}/download`, '_blank');
+    }
+  };
+
   const exampleQuestions = [
     'How does Dijkstra shortest path algorithm work?',
     'Explain difference between process and thread in operating systems',
@@ -748,17 +782,26 @@ export default function PublicSearch() {
 
                           <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
                             <span className="text-[11px] text-slate-400">{res.subject || res.department || 'Open Resource'}</span>
-                            {res.fileUrl && (
-                              <a
-                                href={res.fileUrl}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="font-bold text-emerald-700 hover:text-emerald-900 flex items-center gap-1"
+                            <div className="flex items-center gap-1.5">
+                              <button
+                                type="button"
+                                onClick={() => handleOpenResource(res)}
+                                className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                                title="Open & Preview Document"
                               >
-                                <span>Open Resource</span>
+                                <Eye className="w-3.5 h-3.5" />
+                                <span>Open</span>
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDownloadResource(res)}
+                                className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                                title="Download Document"
+                              >
                                 <Download className="w-3.5 h-3.5" />
-                              </a>
-                            )}
+                                <span>Download</span>
+                              </button>
+                            </div>
                           </div>
                         </div>
                       ))}
@@ -905,17 +948,26 @@ export default function PublicSearch() {
 
                         <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs">
                           <span className="text-[11px] text-slate-400">{doc.subject_name || doc.department_name || 'Academic Note'}</span>
-                          {doc.file_url && (
-                            <a
-                              href={doc.file_url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="font-bold text-indigo-600 hover:text-indigo-800 flex items-center gap-1"
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() => handleOpenResource(doc)}
+                              className="px-2.5 py-1 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                              title="Open & Preview Document"
                             >
-                              <span>Download</span>
+                              <Eye className="w-3.5 h-3.5" />
+                              <span>Open</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadResource(doc)}
+                              className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold rounded-lg transition-all flex items-center gap-1 cursor-pointer"
+                              title="Download Document"
+                            >
                               <Download className="w-3.5 h-3.5" />
-                            </a>
-                          )}
+                              <span>Download</span>
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -1517,6 +1569,14 @@ export default function PublicSearch() {
 
           </div>
         </div>
+      )}
+
+      {/* ── RESOURCE PREVIEW MODAL ────────────────────────────────────────── */}
+      {previewResource && (
+        <ResourcePreviewModal
+          resource={previewResource}
+          onClose={() => setPreviewResource(null)}
+        />
       )}
 
       {/* ── FOOTER ───────────────────────────────────────────────────────────── */}
